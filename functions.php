@@ -2039,14 +2039,14 @@ function xepmarket2_settings_page()
                             $required_plugins = [
                                 ['name' => 'WooCommerce', 'slug' => 'woocommerce', 'path' => 'woocommerce/woocommerce.php', 'required' => true, 'icon' => 'fa-shopping-cart'],
                                 ['name' => 'OmniXEP Gateway', 'slug' => 'omnixep-woocommerce', 'path' => 'omnixep-woocommerce/omnixep-woocommerce.php', 'required' => true, 'icon' => 'fa-wallet'],
-                                ['name' => 'OmniXEP Affiliate', 'slug' => 'omnixep-affiliate', 'path' => 'omnixep-affiliate/omnixep-affiliate.php', 'required' => false, 'icon' => 'fa-handshake'],
+                                ['name' => 'XEP Market Affiliate', 'slug' => 'omnixep-affiliate', 'path' => 'omnixep-affiliate/omnixep-affiliate.php', 'required' => false, 'icon' => 'fa-handshake'],
+                                ['name' => 'XEP Market Telegram Bot', 'slug' => 'xepmarket-telegram-bot', 'path' => 'xepmarket-telegram-bot/xepmarket-telegram-bot.php', 'required' => false, 'icon' => 'fa-robot'],
                                 ['name' => 'AliSync Helper', 'slug' => 'ali-sync-helper', 'required' => false, 'icon' => 'fa-sync-alt', 'type' => 'core'],
                                 ['name' => 'AliDropship', 'slug' => 'woo-alidropship', 'path' => 'woo-alidropship/woo-alidropship.php', 'required' => false, 'icon' => 'fa-ship'],
                                 ['name' => 'Product Variations Swatches', 'slug' => 'product-variations-swatches-for-woocommerce', 'path' => 'product-variations-swatches-for-woocommerce/product-variations-swatches-for-woocommerce.php', 'required' => false, 'icon' => 'fa-palette'],
                                 ['name' => 'Additional Variation Gallery', 'slug' => 'vargal-additional-variation-gallery-for-woo', 'path' => 'vargal-additional-variation-gallery-for-woo/vargal-additional-variation-gallery-for-woo.php', 'required' => false, 'icon' => 'fa-images'],
-                                ['name' => 'Email Template Customizer', 'slug' => 'email-template-customizer-for-woo', 'path' => 'email-template-customizer-for-woo/email-template-customizer-for-woo.php', 'required' => false, 'icon' => 'fa-envelope-open-text'],
                                 ['name' => 'Orders Tracking', 'slug' => 'woo-orders-tracking', 'path' => 'woo-orders-tracking/woo-orders-tracking.php', 'required' => false, 'icon' => 'fa-truck-fast'],
-                                ['name' => 'Google Listings & Ads', 'slug' => 'google-listings-and-ads', 'path' => 'google-listings-and-ads/google-listings-and-ads.php', 'required' => false, 'icon' => 'fa-google'],
+                                ['name' => 'WP Mail SMTP', 'slug' => 'wp-mail-smtp', 'path' => 'wp-mail-smtp/wp_mail_smtp.php', 'required' => false, 'icon' => 'fa-paper-plane'],
                             ];
 
                             if (!function_exists('is_plugin_active')) {
@@ -2211,396 +2211,396 @@ function xepmarket2_settings_page()
 
                             <!-- Drag & Drop Script for Default Fields -->
                             <script>
-                                (function () {
-                                    var sortable = document.getElementById('xep_default_fields_sortable');
-                                    var dragEl = null;
-                                    var dropMode = 'between'; // 'between' or 'pair'
-                                    var dropTarget = null;
+                                   (function () {
+                                                var sortable = document.getElementById('xep_default_fields_sortable');
+                                                var dragEl = null;
+                                                var dropMode = 'between'; // 'between' or 'pair'
+                                                var dropTarget = null;
 
-                                    sortable.addEventListener('dragstart', function (e) {
-                                        dragEl = e.target.closest('.xep-sortable-row');
-                                        if (!dragEl) return;
-                                        dragEl.style.opacity = '0.4';
-                                        e.dataTransfer.effectAllowed = 'move';
-                                        e.dataTransfer.setData('text/plain', '');
-                                    });
-
-                                    sortable.addEventListener('dragend', function () {
-                                        if (dragEl) {
-                                            dragEl.style.opacity = '1';
-                                        }
-                                        clearHighlights();
-                                        dragEl = null;
-                                        dropTarget = null;
-                                    });
-
-                                    sortable.addEventListener('dragover', function (e) {
-                                        e.preventDefault();
-                                        e.dataTransfer.dropEffect = 'move';
-                                        var target = e.target.closest('.xep-sortable-row');
-                                        if (!target || target === dragEl) return;
-
-                                        clearHighlights();
-                                        dropTarget = target;
-
-                                        var rect = target.getBoundingClientRect();
-                                        var relY = e.clientY - rect.top;
-                                        var height = rect.height;
-
-                                        if (relY > height * 0.25 && relY < height * 0.75) {
-                                            // Middle zone = PAIR (same order number)
-                                            dropMode = 'pair';
-                                            target.style.background = 'rgba(0, 242, 255, 0.08)';
-                                            target.style.border = '1px solid rgba(0, 242, 255, 0.5)';
-                                            target.style.boxShadow = '0 0 12px rgba(0, 242, 255, 0.15)';
-                                        } else if (relY <= height * 0.25) {
-                                            // Top zone = INSERT BEFORE
-                                            dropMode = 'before';
-                                            target.style.borderTop = '2px solid var(--admin-primary)';
-                                        } else {
-                                            // Bottom zone = INSERT AFTER
-                                            dropMode = 'after';
-                                            target.style.borderBottom = '2px solid var(--admin-primary)';
-                                        }
-                                    });
-
-                                    sortable.addEventListener('drop', function (e) {
-                                        e.preventDefault();
-                                        if (!dropTarget || !dragEl || dropTarget === dragEl) return;
-
-                                        var dragInput = dragEl.querySelector('.xep-order-input');
-                                        var targetInput = dropTarget.querySelector('.xep-order-input');
-
-                                        if (dropMode === 'pair') {
-                                            // Give dragged field the SAME order number as target
-                                            dragInput.value = targetInput.value;
-                                            // Move next to target in DOM
-                                            sortable.insertBefore(dragEl, dropTarget.nextSibling);
-                                        } else if (dropMode === 'before') {
-                                            sortable.insertBefore(dragEl, dropTarget);
-                                        } else {
-                                            sortable.insertBefore(dragEl, dropTarget.nextSibling);
-                                        }
-
-                                        clearHighlights();
-                                        highlightPairs();
-                                    });
-
-                                    function clearHighlights() {
-                                        sortable.querySelectorAll('.xep-sortable-row').forEach(function (r) {
-                                            r.style.borderTop = '';
-                                            r.style.borderBottom = '';
-                                            r.style.background = 'rgba(255,255,255,0.02)';
-                                            r.style.border = '1px solid var(--admin-border)';
-                                            r.style.boxShadow = 'none';
-                                            r.style.width = '100%';
-                                            r.style.borderLeft = '';
-                                        });
-                                    }
-
-                                    // Highlight rows that share the same order number (paired) and show side by side
-                                    function highlightPairs() {
-                                        var rows = sortable.querySelectorAll('.xep-sortable-row');
-                                        // First reset all to full width
-                                        rows.forEach(function (row) {
-                                            row.style.width = '100%';
-                                            row.style.borderLeft = '';
-                                        });
-                                        // Group by order number
-                                        var orderMap = {};
-                                        rows.forEach(function (row) {
-                                            var val = row.querySelector('.xep-order-input').value;
-                                            if (!orderMap[val]) orderMap[val] = [];
-                                            orderMap[val].push(row);
-                                        });
-                                        for (var key in orderMap) {
-                                            if (orderMap[key].length >= 2) {
-                                                orderMap[key].forEach(function (row) {
-                                                    row.style.width = 'calc(50% - 4px)';
-                                                    row.style.borderLeft = '3px solid var(--admin-primary)';
+                                                sortable.addEventListener('dragstart', function (e) {
+                                                    dragEl = e.target.closest('.xep-sortable-row');
+                                                    if (!dragEl) return;
+                                                    dragEl.style.opacity = '0.4';
+                                                    e.dataTransfer.effectAllowed = 'move';
+                                                    e.dataTransfer.setData('text/plain', '');
                                                 });
-                                            }
-                                        }
-                                    }
 
-                                    // When order number is manually changed, re-sort the rows
-                                    sortable.addEventListener('change', function (e) {
-                                        if (!e.target.classList.contains('xep-order-input')) return;
-
-                                        var rows = Array.from(sortable.querySelectorAll('.xep-sortable-row'));
-                                        rows.sort(function (a, b) {
-                                            var aVal = parseInt(a.querySelector('.xep-order-input').value) || 99;
-                                            var bVal = parseInt(b.querySelector('.xep-order-input').value) || 99;
-                                            return aVal - bVal;
-                                        });
-                                        rows.forEach(function (row) {
-                                            sortable.appendChild(row);
-                                        });
-                                        clearHighlights();
-                                        highlightPairs();
-                                    });
-
-                                    // Hover effect
-                                    sortable.querySelectorAll('.xep-sortable-row').forEach(function (row) {
-                                        row.addEventListener('mouseenter', function () {
-                                            if (!dragEl) {
-                                                this.style.background = 'rgba(0, 242, 255, 0.03)';
-                                            }
-                                        });
-                                        row.addEventListener('mouseleave', function () {
-                                            if (!dragEl) {
-                                                this.style.background = 'rgba(255,255,255,0.02)';
-                                            }
-                                        });
-                                    });
-
-                                    // Initial pair highlight
-                                    highlightPairs();
-                                })();
-                            </script>
-
-                            <!-- Custom Fields Repeater -->
-                            <div style="margin-top: 40px; border-top: 2px solid var(--admin-border); padding-top: 20px;">
-                                <h3 style="color: var(--admin-primary);"><i class="fas fa-plus-circle"></i> Add Custom
-                                    Fields</h3>
-                                <p class="description" style="margin-bottom: 20px;">You can add, rename, and remove your own
-                                    custom text fields here. They will appear at the bottom of the checkout form.</p>
-
-                                <input type="hidden" name="xepmarket2_chk_custom_fields" id="xep_custom_fields_data"
-                                    value="<?php echo esc_attr(get_option('xepmarket2_chk_custom_fields', '[]')); ?>" />
-
-                                <div id="xep_custom_fields_container"></div>
-
-                                <button type="button" class="xep-save-btn" id="xep_add_custom_field_btn"
-                                    style="margin-top: 20px; width: auto; background: rgba(0, 242, 255, 0.1) !important; color: var(--admin-primary) !important; border: 1px dashed var(--admin-primary) !important; margin-right: 15px;">
-                                    <i class="fas fa-plus"></i> Add New Field
-                                </button>
-
-                                <button type="button" class="xep-save-btn xep-trigger-save"
-                                    style="margin-top: 20px; width: auto; box-shadow: 0 4px 15px rgba(var(--primary-rgb), 0.3);">
-                                    <i class="fas fa-save"></i> Save Settings
-                                </button>
-                            </div>
-
-                            <script>
-                                (function () {
-                                    var container = document.getElementById('xep_custom_fields_container');
-                                    var btn = document.getElementById('xep_add_custom_field_btn');
-                                    var dataInput = document.getElementById('xep_custom_fields_data');
-                                    var form = document.getElementById('xep-settings-form');
-
-                                    var customFields = [];
-                                    try {
-                                        customFields = JSON.parse(dataInput.value || '[]');
-                                        if (!Array.isArray(customFields)) customFields = [];
-                                    } catch (e) {
-                                        customFields = [];
-                                    }
-
-                                    function syncData() {
-                                        dataInput.value = JSON.stringify(customFields);
-                                    }
-
-                                    function renderFields() {
-                                        container.innerHTML = '';
-                                        customFields.forEach(function (field, index) {
-                                            var div = document.createElement('div');
-                                            div.className = 'xep-form-group';
-                                            div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:20px;margin-top:20px;background:rgba(255,255,255,0.02);border-radius:12px;border:1px solid var(--admin-border);';
-
-                                            var labelVal = field.label || '';
-                                            var checkedAttr = field.required ? ' checked' : '';
-                                            var orderVal = field.order || 99;
-
-                                            div.innerHTML = '<div style="flex:1;margin-right:20px;">' +
-                                                '<input type="text" class="cf-label" value="' + labelVal.replace(/"/g, '&quot;') + '" placeholder="Custom Field Label (e.g. Tax ID Number)" style="width:100%;border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:#fff;font-weight:700;font-size:16px;padding:5px;" />' +
-                                                '</div>' +
-                                                '<div style="display:flex;align-items:center;gap:15px;">' +
-                                                '<div style="display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px;" title="Order number. Same number = side by side">' +
-                                                '<i class="fas fa-sort-numeric-up" style="opacity:0.5;"></i>' +
-                                                '<input type="number" class="cf-order" value="' + orderVal + '" min="1" max="99" style="width:50px;background:rgba(255,255,255,0.05);border:1px solid var(--admin-border);color:#fff;border-radius:6px;padding:4px 6px;text-align:center;font-size:13px;" />' +
-                                                '</div>' +
-                                                '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-muted);font-size:14px;">' +
-                                                '<input type="checkbox" class="cf-required"' + checkedAttr + ' /> REQUIRED' +
-                                                '</label>' +
-                                                '<button type="button" class="cf-remove" style="background:rgba(255,69,58,0.1);color:#ff453a;border:1px solid rgba(255,69,58,0.2);padding:8px 12px;border-radius:8px;cursor:pointer;">' +
-                                                '<i class="fas fa-trash"></i> Remove' +
-                                                '</button>' +
-                                                '</div>';
-
-                                            var labelInput = div.querySelector('.cf-label');
-                                            var requiredInput = div.querySelector('.cf-required');
-                                            var orderInput = div.querySelector('.cf-order');
-                                            var removeBtn = div.querySelector('.cf-remove');
-
-                                            (function (idx) {
-                                                labelInput.addEventListener('input', function () {
-                                                    customFields[idx].label = this.value;
-                                                    syncData();
+                                                sortable.addEventListener('dragend', function () {
+                                                    if (dragEl) {
+                                                        dragEl.style.opacity = '1';
+                                                    }
+                                                    clearHighlights();
+                                                    dragEl = null;
+                                                    dropTarget = null;
                                                 });
-                                                requiredInput.addEventListener('change', function () {
-                                                    customFields[idx].required = this.checked;
-                                                    syncData();
-                                                });
-                                                orderInput.addEventListener('input', function () {
-                                                    customFields[idx].order = parseInt(this.value) || 99;
-                                                    syncData();
-                                                });
-                                                removeBtn.addEventListener('click', function () {
-                                                    if (confirm('Are you sure you want to remove this custom field?')) {
-                                                        customFields.splice(idx, 1);
-                                                        renderFields();
+
+                                                sortable.addEventListener('dragover', function (e) {
+                                                    e.preventDefault();
+                                                    e.dataTransfer.dropEffect = 'move';
+                                                    var target = e.target.closest('.xep-sortable-row');
+                                                    if (!target || target === dragEl) return;
+
+                                                    clearHighlights();
+                                                    dropTarget = target;
+
+                                                    var rect = target.getBoundingClientRect();
+                                                    var relY = e.clientY - rect.top;
+                                                    var height = rect.height;
+
+                                                    if (relY > height * 0.25 && relY < height * 0.75) {
+                                                        // Middle zone = PAIR (same order number)
+                                                        dropMode = 'pair';
+                                                        target.style.background = 'rgba(0, 242, 255, 0.08)';
+                                                        target.style.border = '1px solid rgba(0, 242, 255, 0.5)';
+                                                        target.style.boxShadow = '0 0 12px rgba(0, 242, 255, 0.15)';
+                                                    } else if (relY <= height * 0.25) {
+                                                        // Top zone = INSERT BEFORE
+                                                        dropMode = 'before';
+                                                        target.style.borderTop = '2px solid var(--admin-primary)';
+                                                    } else {
+                                                        // Bottom zone = INSERT AFTER
+                                                        dropMode = 'after';
+                                                        target.style.borderBottom = '2px solid var(--admin-primary)';
                                                     }
                                                 });
-                                            })(index);
 
-                                            container.appendChild(div);
-                                        });
-                                        syncData();
+                                                sortable.addEventListener('drop', function (e) {
+                                                    e.preventDefault();
+                                                    if (!dropTarget || !dragEl || dropTarget === dragEl) return;
+
+                                                    var dragInput = dragEl.querySelector('.xep-order-input');
+                                                    var targetInput = dropTarget.querySelector('.xep-order-input');
+
+                                                    if (dropMode === 'pair') {
+                                                        // Give dragged field the SAME order number as target
+                                                        dragInput.value = targetInput.value;
+                                                        // Move next to target in DOM
+                                                        sortable.insertBefore(dragEl, dropTarget.nextSibling);
+                                                    } else if (dropMode === 'before') {
+                                                        sortable.insertBefore(dragEl, dropTarget);
+                                                    } else {
+                                                        sortable.insertBefore(dragEl, dropTarget.nextSibling);
+                                                    }
+
+                                                    clearHighlights();
+                                                    highlightPairs();
+                                                });
+
+                                                function clearHighlights() {
+                                                    sortable.querySelectorAll('.xep-sortable-row').forEach(function (r) {
+                                                        r.style.borderTop = '';
+                                                        r.style.borderBottom = '';
+                                                        r.style.background = 'rgba(255,255,255,0.02)';
+                                                        r.style.border = '1px solid var(--admin-border)';
+                                                        r.style.boxShadow = 'none';
+                                                        r.style.width = '100%';
+                                                        r.style.borderLeft = '';
+                                                    });
+                                                }
+
+                                                // Highlight rows that share the same order number (paired) and show side by side
+                                                function highlightPairs() {
+                                                    var rows = sortable.querySelectorAll('.xep-sortable-row');
+                                                    // First reset all to full width
+                                                    rows.forEach(function (row) {
+                                                        row.style.width = '100%';
+                                                        row.style.borderLeft = '';
+                                                    });
+                                                    // Group by order number
+                                                    var orderMap = {};
+                                                    rows.forEach(function (row) {
+                                                        var val = row.querySelector('.xep-order-input').value;
+                                                        if (!orderMap[val]) orderMap[val] = [];
+                                                        orderMap[val].push(row);
+                                                    });
+                                                    for (var key in orderMap) {
+                                                        if (orderMap[key].length >= 2) {
+                                                            orderMap[key].forEach(function (row) {
+                                                                row.style.width = 'calc(50% - 4px)';
+                                                                row.style.borderLeft = '3px solid var(--admin-primary)';
+                                                            });
+                                                        }
+                                                    }
+                                                }
+
+                                                // When order number is manually changed, re-sort the rows
+                                                sortable.addEventListener('change', function (e) {
+                                                    if (!e.target.classList.contains('xep-order-input')) return;
+
+                                                    var rows = Array.from(sortable.querySelectorAll('.xep-sortable-row'));
+                                                    rows.sort(function (a, b) {
+                                                        var aVal = parseInt(a.querySelector('.xep-order-input').value) || 99;
+                                                        var bVal = parseInt(b.querySelector('.xep-order-input').value) || 99;
+                                                        return aVal - bVal;
+                                                    });
+                                                    rows.forEach(function (row) {
+                                                        sortable.appendChild(row);
+                                                    });
+                                                    clearHighlights();
+                                                    highlightPairs();
+                                                });
+
+                                                // Hover effect
+                                                sortable.querySelectorAll('.xep-sortable-row').forEach(function (row) {
+                                                    row.addEventListener('mouseenter', function () {
+                                                        if (!dragEl) {
+                                                            this.style.background = 'rgba(0, 242, 255, 0.03)';
+                                                        }
+                                                    });
+                                                    row.addEventListener('mouseleave', function () {
+                                                        if (!dragEl) {
+                                                            this.style.background = 'rgba(255,255,255,0.02)';
+                                                        }
+                                                    });
+                                                });
+
+                                                // Initial pair highlight
+                                                highlightPairs();
+                                            })();
+                                        </script>
+
+                                        <!-- Custom Fields Repeater -->
+                                        <div style="margin-top: 40px; border-top: 2px solid var(--admin-border); padding-top: 20px;">
+                                            <h3 style="color: var(--admin-primary);"><i class="fas fa-plus-circle"></i> Add Custom
+                                                Fields</h3>
+                                            <p class="description" style="margin-bottom: 20px;">You can add, rename, and remove your own
+                                                custom text fields here. They will appear at the bottom of the checkout form.</p>
+
+                                            <input type="hidden" name="xepmarket2_chk_custom_fields" id="xep_custom_fields_data"
+                                                value="<?php echo esc_attr(get_option('xepmarket2_chk_custom_fields', '[]')); ?>" />
+
+                                            <div id="xep_custom_fields_container"></div>
+
+                                            <button type="button" class="xep-save-btn" id="xep_add_custom_field_btn"
+                                                style="margin-top: 20px; width: auto; background: rgba(0, 242, 255, 0.1) !important; color: var(--admin-primary) !important; border: 1px dashed var(--admin-primary) !important; margin-right: 15px;">
+                                                <i class="fas fa-plus"></i> Add New Field
+                                            </button>
+
+                                            <button type="button" class="xep-save-btn xep-trigger-save"
+                                                style="margin-top: 20px; width: auto; box-shadow: 0 4px 15px rgba(var(--primary-rgb), 0.3);">
+                                                <i class="fas fa-save"></i> Save Settings
+                                            </button>
+                                        </div>
+
+                                        <script>
+                                            (function () {
+                                                var container = document.getElementById('xep_custom_fields_container');
+                                                var btn = document.getElementById('xep_add_custom_field_btn');
+                                                var dataInput = document.getElementById('xep_custom_fields_data');
+                                                var form = document.getElementById('xep-settings-form');
+
+                                                var customFields = [];
+                                                try {
+                                                    customFields = JSON.parse(dataInput.value || '[]');
+                                                    if (!Array.isArray(customFields)) customFields = [];
+                                                } catch (e) {
+                                                    customFields = [];
+                                                }
+
+                                                function syncData() {
+                                                    dataInput.value = JSON.stringify(customFields);
+                                                }
+
+                                                function renderFields() {
+                                                    container.innerHTML = '';
+                                                    customFields.forEach(function (field, index) {
+                                                        var div = document.createElement('div');
+                                                        div.className = 'xep-form-group';
+                                                        div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:20px;margin-top:20px;background:rgba(255,255,255,0.02);border-radius:12px;border:1px solid var(--admin-border);';
+
+                                                        var labelVal = field.label || '';
+                                                        var checkedAttr = field.required ? ' checked' : '';
+                                                        var orderVal = field.order || 99;
+
+                                                        div.innerHTML = '<div style="flex:1;margin-right:20px;">' +
+                                                            '<input type="text" class="cf-label" value="' + labelVal.replace(/"/g, '&quot;') + '" placeholder="Custom Field Label (e.g. Tax ID Number)" style="width:100%;border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:#fff;font-weight:700;font-size:16px;padding:5px;" />' +
+                                                            '</div>' +
+                                                            '<div style="display:flex;align-items:center;gap:15px;">' +
+                                                            '<div style="display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px;" title="Order number. Same number = side by side">' +
+                                                            '<i class="fas fa-sort-numeric-up" style="opacity:0.5;"></i>' +
+                                                            '<input type="number" class="cf-order" value="' + orderVal + '" min="1" max="99" style="width:50px;background:rgba(255,255,255,0.05);border:1px solid var(--admin-border);color:#fff;border-radius:6px;padding:4px 6px;text-align:center;font-size:13px;" />' +
+                                                            '</div>' +
+                                                            '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-muted);font-size:14px;">' +
+                                                            '<input type="checkbox" class="cf-required"' + checkedAttr + ' /> REQUIRED' +
+                                                            '</label>' +
+                                                            '<button type="button" class="cf-remove" style="background:rgba(255,69,58,0.1);color:#ff453a;border:1px solid rgba(255,69,58,0.2);padding:8px 12px;border-radius:8px;cursor:pointer;">' +
+                                                            '<i class="fas fa-trash"></i> Remove' +
+                                                            '</button>' +
+                                                            '</div>';
+
+                                                        var labelInput = div.querySelector('.cf-label');
+                                                        var requiredInput = div.querySelector('.cf-required');
+                                                        var orderInput = div.querySelector('.cf-order');
+                                                        var removeBtn = div.querySelector('.cf-remove');
+
+                                                        (function (idx) {
+                                                            labelInput.addEventListener('input', function () {
+                                                                customFields[idx].label = this.value;
+                                                                syncData();
+                                                            });
+                                                            requiredInput.addEventListener('change', function () {
+                                                                customFields[idx].required = this.checked;
+                                                                syncData();
+                                                            });
+                                                            orderInput.addEventListener('input', function () {
+                                                                customFields[idx].order = parseInt(this.value) || 99;
+                                                                syncData();
+                                                            });
+                                                            removeBtn.addEventListener('click', function () {
+                                                                if (confirm('Are you sure you want to remove this custom field?')) {
+                                                                    customFields.splice(idx, 1);
+                                                                    renderFields();
+                                                                }
+                                                            });
+                                                        })(index);
+
+                                                        container.appendChild(div);
+                                                    });
+                                                    syncData();
+                                                }
+
+                                                btn.addEventListener('click', function () {
+                                                    customFields.push({
+                                                        id: 'custom_' + Date.now().toString(36),
+                                                        label: '',
+                                                        required: false,
+                                                        order: 99
+                                                    });
+                                                    renderFields();
+                                                });
+
+                                                form.addEventListener('submit', function () {
+                                                    syncData();
+                                                });
+
+                                                renderFields();
+                                            })();
+                                        </script>
+                                    </div>
+                                </div>
+
+                                <!-- Tab: Support -->
+                                <div id="tab-support" class="xep-tab-content">
+                                    <div class="xep-section-card">
+                                        <h3>Support Section Customization</h3>
+                                        <div class="xep-form-group">
+                                            <label>Section Title</label>
+                                            <input type="text" name="xepmarket2_support_title"
+                                                value="<?php echo esc_attr(get_option('xepmarket2_support_title', 'Web3 Native <span class="logo-accent">Support</span>')); ?>" />
+                                        </div>
+                                        <div class="xep-form-group">
+                                            <label>Section Description</label>
+                                            <textarea name="xepmarket2_support_desc"
+                                                rows="3"><?php echo esc_textarea(get_option('xepmarket2_support_desc', 'Need help with your order or crypto payment? Our decentralized support team is ready to help you navigate the future of commerce.')); ?></textarea>
+                                        </div>
+                                        <div class="xep-grid-2">
+                                            <div class="xep-form-group">
+                                                <label>Support Email Address</label>
+                                                <input type="text" name="xepmarket2_support_email"
+                                                    value="<?php echo esc_attr(get_option('xepmarket2_support_email', 'crypto@xepmarket.com')); ?>" />
+                                            </div>
+                                            <div class="xep-form-group">
+                                                <label>Support Telegram Handle</label>
+                                                <input type="text" name="xepmarket2_support_telegram"
+                                                    value="<?php echo esc_attr(get_option('xepmarket2_support_telegram', '@xepmarket')); ?>" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tab: SEO -->
+                                <?php if (function_exists('xepmarket2_seo_settings_tab_content'))
+                                    xepmarket2_seo_settings_tab_content(); ?>
+
+                                <!-- Tab: Demo Import -->
+                                <div id="tab-demo" class="xep-tab-content">
+                                    <div class="xep-section-card">
+                                        <h3 style="color: var(--admin-primary);"><i class="fas fa-magic"></i> One-Click Demo Setup</h3>
+                                        <p class="description" style="margin-bottom: 25px;">This tool will automatically configure your
+                                            site to match the XEPMARKET-ALFA live preview by creating essential pages, setting up menus,
+                                            and configuring core theme settings.</p>
+
+                                        <div class="xep-demo-box"
+                                            style="background: rgba(0, 242, 255, 0.03); border: 2px dashed rgba(0, 242, 255, 0.2); padding: 50px 30px; border-radius: 20px; text-align: center;">
+                                            <div
+                                                style="width: 80px; height: 80px; background: rgba(0, 242, 255, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; color: var(--admin-primary); font-size: 32px;">
+                                                <i class="fas fa-rocket"></i>
+                                            </div>
+                                            <h3 style="margin-bottom: 15px;">Automated Store Installation</h3>
+                                            <p style="max-width: 500px; margin: 0 auto 35px; opacity: 0.8; line-height: 1.6;">Ready to
+                                                build your crypto merchandise empire? Clicking below will generate your Home, Shop, and
+                                                Swap pages, configure the navigation menu, and apply premium theme defaults.</p>
+
+                                            <button type="button" id="xep-run-demo-import" class="xep-save-btn"
+                                                style="padding: 15px 45px; font-size: 16px; width: auto !important; cursor: pointer; background: linear-gradient(135deg, var(--admin-primary), #00d2ff) !important; box-shadow: 0 10px 25px rgba(0, 242, 255, 0.2) !important;">
+                                                RUN ONE-CLICK INSTALL
+                                            </button>
+
+                                            <div id="xep-demo-status"
+                                                style="margin-top: 30px; font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
+                                            </div>
+                                            <div id="xep-demo-progress"
+                                                style="display: none; width: 100%; max-width: 400px; height: 6px; background: rgba(255,255,255,0.05); border-radius: 10px; margin: 20px auto 0; overflow: hidden;">
+                                                <div class="xep-progress-bar"
+                                                    style="width: 0%; height: 100%; background: var(--admin-primary); transition: width 0.3s ease;">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="xep-factory-reset-box"
+                                            style="margin-top: 40px; padding: 30px; border-radius: 20px; background: rgba(255, 69, 58, 0.03); border: 1px solid rgba(255, 69, 58, 0.1);">
+                                            <div style="display: flex; align-items: flex-start; gap: 20px;">
+                                                <div
+                                                    style="width: 50px; height: 50px; background: rgba(255, 69, 58, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #ff453a; font-size: 20px; shrink: 0;">
+                                                    <i class="fas fa-trash-alt"></i>
+                                                </div>
+                                                <div style="flex: 1;">
+                                                    <h4 style="color: #ff453a; margin-bottom: 5px;">Factory Reset Theme</h4>
+                                                    <p style="font-size: 13px; opacity: 0.7; margin-bottom: 15px;">Wipe all
+                                                        theme-specific settings, logos, and custom menus back to their original state.
+                                                        <strong>This action cannot be undone.</strong>
+                                                    </p>
+                                                    <button type="button" id="xep-factory-reset" class="xep-save-btn"
+                                                        style="background: linear-gradient(135deg, #ff453a, #d32f2f) !important; width: auto !important; padding: 10px 25px !important; font-size: 12px !important;">WIPE
+                                                        & RESET EVERYTHING</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            style="margin-top: 30px; padding: 20px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid var(--admin-border);">
+                                            <h4 style="margin-bottom: 10px;"><i class="fas fa-info-circle"></i> Important Information
+                                            </h4>
+                                            <ul style="margin: 0; padding-left: 20px; font-size: 13px; opacity: 0.7; line-height: 1.8;">
+                                                <li>Existing posts, products and pages will <strong>not</strong> be modified.</li>
+                                                <li>New pages (Home, Shop, Swap) will be created if they don't exist.</li>
+                                                <li>Theme settings will be updated to match the premium demo defaults.</li>
+                                                <li>Navigation menus will be automatically assigned to their respective positions.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tab: Auto Updater -->
+                                <div id="tab-updater" class="xep-tab-content">
+                                    <?php
+                                    global $xepmarket_updater;
+                                    if (isset($xepmarket_updater) && is_object($xepmarket_updater)) {
+                                        $xepmarket_updater->updater_page_html();
+                                    } else {
+                                        echo '<div class="xep-section-card"><p>Updater module is loading...</p></div>';
                                     }
-
-                                    btn.addEventListener('click', function () {
-                                        customFields.push({
-                                            id: 'custom_' + Date.now().toString(36),
-                                            label: '',
-                                            required: false,
-                                            order: 99
-                                        });
-                                        renderFields();
-                                    });
-
-                                    form.addEventListener('submit', function () {
-                                        syncData();
-                                    });
-
-                                    renderFields();
-                                })();
-                            </script>
-                        </div>
-                    </div>
-
-                    <!-- Tab: Support -->
-                    <div id="tab-support" class="xep-tab-content">
-                        <div class="xep-section-card">
-                            <h3>Support Section Customization</h3>
-                            <div class="xep-form-group">
-                                <label>Section Title</label>
-                                <input type="text" name="xepmarket2_support_title"
-                                    value="<?php echo esc_attr(get_option('xepmarket2_support_title', 'Web3 Native <span class="logo-accent">Support</span>')); ?>" />
-                            </div>
-                            <div class="xep-form-group">
-                                <label>Section Description</label>
-                                <textarea name="xepmarket2_support_desc"
-                                    rows="3"><?php echo esc_textarea(get_option('xepmarket2_support_desc', 'Need help with your order or crypto payment? Our decentralized support team is ready to help you navigate the future of commerce.')); ?></textarea>
-                            </div>
-                            <div class="xep-grid-2">
-                                <div class="xep-form-group">
-                                    <label>Support Email Address</label>
-                                    <input type="text" name="xepmarket2_support_email"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_support_email', 'crypto@xepmarket.com')); ?>" />
+                                    ?>
                                 </div>
-                                <div class="xep-form-group">
-                                    <label>Support Telegram Handle</label>
-                                    <input type="text" name="xepmarket2_support_telegram"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_support_telegram', '@xepmarket')); ?>" />
-                                </div>
+
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Tab: SEO -->
-                    <?php if (function_exists('xepmarket2_seo_settings_tab_content'))
-                        xepmarket2_seo_settings_tab_content(); ?>
-
-                    <!-- Tab: Demo Import -->
-                    <div id="tab-demo" class="xep-tab-content">
-                        <div class="xep-section-card">
-                            <h3 style="color: var(--admin-primary);"><i class="fas fa-magic"></i> One-Click Demo Setup</h3>
-                            <p class="description" style="margin-bottom: 25px;">This tool will automatically configure your
-                                site to match the XEPMARKET-ALFA live preview by creating essential pages, setting up menus,
-                                and configuring core theme settings.</p>
-
-                            <div class="xep-demo-box"
-                                style="background: rgba(0, 242, 255, 0.03); border: 2px dashed rgba(0, 242, 255, 0.2); padding: 50px 30px; border-radius: 20px; text-align: center;">
-                                <div
-                                    style="width: 80px; height: 80px; background: rgba(0, 242, 255, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; color: var(--admin-primary); font-size: 32px;">
-                                    <i class="fas fa-rocket"></i>
-                                </div>
-                                <h3 style="margin-bottom: 15px;">Automated Store Installation</h3>
-                                <p style="max-width: 500px; margin: 0 auto 35px; opacity: 0.8; line-height: 1.6;">Ready to
-                                    build your crypto merchandise empire? Clicking below will generate your Home, Shop, and
-                                    Swap pages, configure the navigation menu, and apply premium theme defaults.</p>
-
-                                <button type="button" id="xep-run-demo-import" class="xep-save-btn"
-                                    style="padding: 15px 45px; font-size: 16px; width: auto !important; cursor: pointer; background: linear-gradient(135deg, var(--admin-primary), #00d2ff) !important; box-shadow: 0 10px 25px rgba(0, 242, 255, 0.2) !important;">
-                                    RUN ONE-CLICK INSTALL
-                                </button>
-
-                                <div id="xep-demo-status"
-                                    style="margin-top: 30px; font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
-                                </div>
-                                <div id="xep-demo-progress"
-                                    style="display: none; width: 100%; max-width: 400px; height: 6px; background: rgba(255,255,255,0.05); border-radius: 10px; margin: 20px auto 0; overflow: hidden;">
-                                    <div class="xep-progress-bar"
-                                        style="width: 0%; height: 100%; background: var(--admin-primary); transition: width 0.3s ease;">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="xep-factory-reset-box"
-                                style="margin-top: 40px; padding: 30px; border-radius: 20px; background: rgba(255, 69, 58, 0.03); border: 1px solid rgba(255, 69, 58, 0.1);">
-                                <div style="display: flex; align-items: flex-start; gap: 20px;">
-                                    <div
-                                        style="width: 50px; height: 50px; background: rgba(255, 69, 58, 0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #ff453a; font-size: 20px; shrink: 0;">
-                                        <i class="fas fa-trash-alt"></i>
-                                    </div>
-                                    <div style="flex: 1;">
-                                        <h4 style="color: #ff453a; margin-bottom: 5px;">Factory Reset Theme</h4>
-                                        <p style="font-size: 13px; opacity: 0.7; margin-bottom: 15px;">Wipe all
-                                            theme-specific settings, logos, and custom menus back to their original state.
-                                            <strong>This action cannot be undone.</strong>
-                                        </p>
-                                        <button type="button" id="xep-factory-reset" class="xep-save-btn"
-                                            style="background: linear-gradient(135deg, #ff453a, #d32f2f) !important; width: auto !important; padding: 10px 25px !important; font-size: 12px !important;">WIPE
-                                            & RESET EVERYTHING</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div
-                                style="margin-top: 30px; padding: 20px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid var(--admin-border);">
-                                <h4 style="margin-bottom: 10px;"><i class="fas fa-info-circle"></i> Important Information
-                                </h4>
-                                <ul style="margin: 0; padding-left: 20px; font-size: 13px; opacity: 0.7; line-height: 1.8;">
-                                    <li>Existing posts, products and pages will <strong>not</strong> be modified.</li>
-                                    <li>New pages (Home, Shop, Swap) will be created if they don't exist.</li>
-                                    <li>Theme settings will be updated to match the premium demo defaults.</li>
-                                    <li>Navigation menus will be automatically assigned to their respective positions.</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab: Auto Updater -->
-                    <div id="tab-updater" class="xep-tab-content">
-                        <?php
-                        global $xepmarket_updater;
-                        if (isset($xepmarket_updater) && is_object($xepmarket_updater)) {
-                            $xepmarket_updater->updater_page_html();
-                        } else {
-                            echo '<div class="xep-section-card"><p>Updater module is loading...</p></div>';
-                        }
-                        ?>
-                    </div>
-
+                    </form>
                 </div>
-            </div>
-        </form>
-    </div>
 
-    <script>     jQuery(document).ready(function ($) { $('.xep-trigger-save').on('click', function () { $('#xep-settings-form').submit(); }); });
-    </script>
-    <?php
+                <script>     jQuery(document).ready(function ($) { $('.xep-trigger-save').on('click', function () { $('#xep-settings-form').submit(); }); });
+                </script>
+                <?php
 }
 
 

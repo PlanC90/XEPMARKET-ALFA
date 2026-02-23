@@ -67,21 +67,17 @@ function xepmarket2_register_required_plugins()
             'required' => false,
         ),
         array(
-            'name' => 'Email Template Customizer',
-            'slug' => 'email-template-customizer-for-woo',
-            'source' => 'email-template-customizer-for-woo.zip',
-            'required' => false,
-        ),
-        array(
             'name' => 'Orders Tracking',
             'slug' => 'woo-orders-tracking',
             'source' => 'woo-orders-tracking.zip',
             'required' => false,
         ),
+
+
         array(
-            'name' => 'Google Listings & Ads',
-            'slug' => 'google-listings-and-ads',
-            'source' => 'google-listings-and-ads.zip',
+            'name' => 'WP Mail SMTP',
+            'slug' => 'wp-mail-smtp',
+            'source' => 'wp-mail-smtp.zip',
             'required' => false,
         ),
     );
