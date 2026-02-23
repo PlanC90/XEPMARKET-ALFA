@@ -15,8 +15,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 1.3.1 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.3.1');
+// Define Theme Version: 1.3.2 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '1.3.2');
 
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
@@ -2053,13 +2053,16 @@ function xepmarket2_settings_page()
                                 include_once(ABSPATH . 'wp-admin/includes/plugin.php');
                             }
 
+                            $all_plugins = get_plugins();
+
                             foreach ($required_plugins as $plug):
                                 if (isset($plug['type']) && $plug['type'] === 'core') {
                                     $is_installed = true;
                                     $is_active = true;
                                 } else {
-                                    $is_installed = file_exists(WP_PLUGIN_DIR . '/' . $plug['path']);
-                                    $is_active = $is_installed && is_plugin_active($plug['path']);
+                                    $plugin_file = $plug['path'];
+                                    $is_installed = array_key_exists($plugin_file, $all_plugins);
+                                    $is_active = $is_installed && is_plugin_active($plugin_file);
                                 }
                                 ?>
                                 <div class="xep-form-group"
