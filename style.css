@@ -1,0 +1,46 @@
+/*
+Theme Name: XEPMARKET-ALFA
+Theme URI: https://xepmarket.com/
+Author: XEPMARKET
+Author URI: https://xepmarket.com/
+Description: The most compatible and easy-to-use theme designed for XEP, MMX, and OmniXEP token payments. All necessary modules are bundled within the theme. All payments go directly to your wallet. Perfectly compatible for dropshipping.
+Version: 1.0.1
+Text Domain: xepmarket2
+*/
+
+/*
+  XepMarket Design System
+  -----------------------------------
+  Colors:
+  - Primary: #00f2ff (Cyan / XEP Blue)
+  - Secondary: #7000ff (Purple)
+  - Background: #0a0b10 (Deep Dark)
+  - Surface: rgba(255, 255, 255, 0.05) (Glassmorphism)
+  - Text: #ffffff
+  - Text Muted: #a0a0b0
+*/
+
+:root {
+  --primary: #ffcc00;
+  --primary-glow: rgba(255, 204, 0, 0.4);
+  --secondary: #ff6600;
+  --background: #0d0d0d;
+  --surface: rgba(255, 255, 255, 0.03);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --text: #ffffff;
+  --text-muted: #b0b0b0;
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.9);
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Base styles will be in assets/css/main.css */
