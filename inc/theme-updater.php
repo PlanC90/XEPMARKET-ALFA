@@ -211,26 +211,32 @@ class XepMarket_Theme_Updater
         require_once ABSPATH . 'wp-admin/includes/misc.php';
 
         // Force check updates so package info is refreshed in transient
+        delete_site_transient('update_themes');
         $this->get_latest_release(true);
         wp_update_themes();
 
         try {
-            // Using WP_Ajax_Upgrader_Skin to keep simple progress reporting suppressed
+            // Using Automatic_Upgrader_Skin to keep it quiet
             $skin = new Automatic_Upgrader_Skin();
             $upgrader = new Theme_Upgrader($skin);
 
-            ob_start();
+            // Log start of update
+            error_log("XEP Update: Starting update for " . $this->theme_slug);
+
             $result = $upgrader->upgrade($this->theme_slug);
-            ob_get_clean();
 
             if (is_wp_error($result)) {
+                error_log("XEP Update Error (WP_Error): " . $result->get_error_message());
                 wp_send_json_error($result->get_error_message());
             } elseif ($result === false) {
-                wp_send_json_error('System rejected the update (possibly folder permission issue). Try standard update via Appearance > Themes.');
+                error_log("XEP Update Failed: Upgrader returned false. Possible missing package or version mismatch.");
+                wp_send_json_error('System rejected the update. This usually happens if the update package is missing or folder permissions (FS_METHOD) are restricted. Try updating via Appearance > Themes.');
             }
 
+            error_log("XEP Update Success!");
             wp_send_json_success('Theme updated successfully to latest version.');
         } catch (Exception $e) {
+            error_log("XEP Update Exception: " . $e->getMessage());
             wp_send_json_error('Update failed: ' . $e->getMessage());
         }
     }
