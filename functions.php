@@ -16,8 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define Theme Version: 1.3.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.3.2');
-
+define('XEPMARKET_ALFA_VERSION', '1.3.3'); // Updated for Telegram Bot Integration & Auto-Updater fixes
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
@@ -2060,9 +2059,29 @@ function xepmarket2_settings_page()
                                     $is_installed = true;
                                     $is_active = true;
                                 } else {
-                                    $plugin_file = $plug['path'];
-                                    $is_installed = array_key_exists($plugin_file, $all_plugins);
-                                    $is_active = $is_installed && is_plugin_active($plugin_file);
+                                    $is_installed = false;
+                                    $is_active = false;
+                                    $plugin_path = isset($plug['path']) ? $plug['path'] : '';
+
+                                    // Check by explicit path first
+                                    if ($plugin_path && array_key_exists($plugin_path, $all_plugins)) {
+                                        $is_installed = true;
+                                        $is_active = is_plugin_active($plugin_path);
+                                    } else {
+                                        // Backup: Match by folder (slug) prefix
+                                        foreach ($all_plugins as $path => $data) {
+                                            if (strpos($path, $plug['slug'] . '/') === 0) {
+                                                $is_installed = true;
+                                                $plugin_path = $path;
+                                                $is_active = is_plugin_active($path);
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (!$is_installed && file_exists(WP_PLUGIN_DIR . '/' . $plug['slug'])) {
+                                        $is_installed = true;
+                                    }
                                 }
                                 ?>
                                 <div class="xep-form-group"
@@ -2300,27 +2319,32 @@ function xepmarket2_settings_page()
                                         });
                                     }
 
-                                    // Highlight rows that share the same order number (paired) and show side by side
+                                    // Highlight rows only if they share the SAME order number AND are neighbors
                                     function highlightPairs() {
-                                        var rows = sortable.querySelectorAll('.xep-sortable-row');
-                                        // First reset all to full width
+                                        var rows = Array.from(sortable.querySelectorAll('.xep-sortable-row'));
+
+                                        // Reset everything first
                                         rows.forEach(function (row) {
                                             row.style.width = '100%';
                                             row.style.borderLeft = '';
+                                            row.classList.remove('xep-paired');
                                         });
-                                        // Group by order number
-                                        var orderMap = {};
-                                        rows.forEach(function (row) {
-                                            var val = row.querySelector('.xep-order-input').value;
-                                            if (!orderMap[val]) orderMap[val] = [];
-                                            orderMap[val].push(row);
-                                        });
-                                        for (var key in orderMap) {
-                                            if (orderMap[key].length >= 2) {
-                                                orderMap[key].forEach(function (row) {
-                                                    row.style.width = 'calc(50% - 4px)';
-                                                    row.style.borderLeft = '3px solid var(--admin-primary)';
-                                                });
+
+                                        for (var i = 0; i < rows.length - 1; i++) {
+                                            var current = rows[i];
+                                            var next = rows[i + 1];
+                                            var curVal = current.querySelector('.xep-order-input').value;
+                                            var nextVal = next.querySelector('.xep-order-input').value;
+
+                                            // Only pair if values match and are valid numbers
+                                            if (curVal !== '' && curVal === nextVal && parseInt(curVal) > 0) {
+                                                current.style.width = 'calc(50% - 4px)';
+                                                next.style.width = 'calc(50% - 4px)';
+                                                current.style.borderLeft = '3px solid var(--admin-primary)';
+                                                next.style.borderLeft = '3px solid var(--admin-primary)';
+                                                current.classList.add('xep-paired');
+                                                next.classList.add('xep-paired');
+                                                i++; // Skip the next index as it's already paired
                                             }
                                         }
                                     }
@@ -2335,25 +2359,27 @@ function xepmarket2_settings_page()
                                             var bVal = parseInt(b.querySelector('.xep-order-input').value) || 99;
                                             return aVal - bVal;
                                         });
+
                                         rows.forEach(function (row) {
                                             sortable.appendChild(row);
                                         });
+
                                         clearHighlights();
                                         highlightPairs();
                                     });
 
                                     // Hover effect
-                                    sortable.querySelectorAll('.xep-sortable-row').forEach(function (row) {
-                                        row.addEventListener('mouseenter', function () {
-                                            if (!dragEl) {
-                                                this.style.background = 'rgba(0, 242, 255, 0.03)';
-                                            }
-                                        });
-                                        row.addEventListener('mouseleave', function () {
-                                            if (!dragEl) {
-                                                this.style.background = 'rgba(255,255,255,0.02)';
-                                            }
-                                        });
+                                    sortable.addEventListener('mouseover', function (e) {
+                                        var row = e.target.closest('.xep-sortable-row');
+                                        if (row && !dragEl) {
+                                            row.style.background = 'rgba(0, 242, 255, 0.03)';
+                                        }
+                                    });
+                                    sortable.addEventListener('mouseout', function (e) {
+                                        var row = e.target.closest('.xep-sortable-row');
+                                        if (row && !dragEl) {
+                                            row.style.background = 'rgba(255,255,255,0.02)';
+                                        }
                                     });
 
                                     // Initial pair highlight
@@ -2597,10 +2623,111 @@ function xepmarket2_settings_page()
 
                 </div>
             </div>
+            <input type="hidden" id="xep_admin_ajax_nonce" value="<?php echo wp_create_nonce('xep_admin_nonce'); ?>">
         </form>
     </div>
 
-    <script>     jQuery(document).ready(function ($) { $('.xep-trigger-save').on('click', function () { $('#xep-settings-form').submit(); }); });
+    <script>
+        jQuery(document).ready(function ($) {
+            // Tab Switching Logic
+            $('.xep-nav-item').on('click', function () {
+                var tabId = $(this).data('tab');
+
+                // Update Sidebar
+                $('.xep-nav-item').removeClass('active');
+                $(this).addClass('active');
+
+                // Update Content
+                $('.xep-tab-content').removeClass('active');
+                $('#' + tabId).addClass('active');
+
+                // Update URL for persistence
+                window.location.hash = tabId;
+            });
+
+            // Handle URL Hash for persistent tabs on refresh
+            var hash = window.location.hash;
+            if (hash) {
+                var $targetTab = $('.xep-nav-item[data-tab="' + hash.replace('#', '') + '"]');
+                if ($targetTab.length > 0) {
+                    $targetTab.trigger('click');
+                }
+            }
+
+            // Quick Save Trigger
+            $('.xep-trigger-save').on('click', function () {
+                $('#xep-settings-form').submit();
+            });
+
+            // ── AJAX: Demo Import ──
+            $('#xep-run-demo-import').on('click', function () {
+                if (!confirm('Run One-Click Setup? This will create essential pages and apply demo defaults.')) return;
+
+                var $btn = $(this);
+                var $status = $('#xep-demo-status');
+                var $progWrap = $('#xep-demo-progress');
+                var $progBar = $progWrap.find('.xep-progress-bar');
+                var nonce = $('#xep_admin_ajax_nonce').val();
+
+                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> IMPORTING...');
+                $status.text('Starting data import...').css('color', 'var(--admin-primary)');
+                $progWrap.fadeIn();
+                $progBar.css('width', '10%');
+
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: { action: 'xep_import_demo', nonce: nonce },
+                    success: function (response) {
+                        if (response.success) {
+                            $progBar.css('width', '100%');
+                            $status.text('SETUP COMPLETE! REFRESHING...').css('color', '#32d74b');
+                            setTimeout(function () { window.location.reload(); }, 1500);
+                        } else {
+                            $status.text('ERROR: ' + response.data).css('color', '#ff453a');
+                            $btn.prop('disabled', false).text('RUN ONE-CLICK INSTALL');
+                        }
+                    },
+                    error: function () {
+                        $status.text('CONNECTION ERROR. TRY AGAIN.').css('color', '#ff453a');
+                        $btn.prop('disabled', false).text('RUN ONE-CLICK INSTALL');
+                    }
+                });
+            });
+
+            // ── AJAX: Factory Reset ──
+            $('#xep-factory-reset').on('click', function () {
+                if (!confirm('⚠️ CRITICAL: Are you sure? This will wipe ALL theme settings and cannot be undone.')) return;
+                if (!confirm('Second Confirmation: Wipe all data?')) return;
+
+                var $btn = $(this);
+                var nonce = $('#xep_admin_ajax_nonce').val();
+
+                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> WIPING DATA...');
+
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: { action: 'xep_factory_reset', nonce: nonce },
+                    success: function (response) {
+                        if (response.success) {
+                            alert('Factory reset successful. The page will now reload.');
+                            window.location.reload();
+                        } else {
+                            alert('Error: ' + response.data);
+                            $btn.prop('disabled', false).text('WIPE & RESET EVERYTHING');
+                        }
+                    }
+                });
+            });
+
+            // Status message auto-hide
+            if ($('.updated, .error').length > 0) {
+                setTimeout(function () {
+                    $('.updated, .error').fadeOut();
+                }, 5000);
+            }
+        });
     </script>
     <?php
 }

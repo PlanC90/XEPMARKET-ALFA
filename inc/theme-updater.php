@@ -21,6 +21,7 @@ class XepMarket_Theme_Updater
 
         add_filter('pre_set_site_transient_update_themes', array($this, 'check_update'));
         add_action('admin_post_xepmarket_force_update_check', array($this, 'manual_check'));
+        add_action('admin_post_xep_manual_install', array($this, 'manual_install'));
         add_filter('upgrader_source_selection', array($this, 'rename_github_folder'), 10, 4);
         add_action('wp_ajax_xep_update_theme', array($this, 'ajax_update_theme'));
     }
@@ -114,60 +115,96 @@ class XepMarket_Theme_Updater
                                 style="width: 0%; height: 100%; background: var(--admin-primary); transition: width 0.3s ease;">
                             </div>
                         </div>
+
+                        <div style="margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 15px;">
+                            <a href="<?php echo admin_url('admin-post.php?action=xep_manual_install&nonce=' . wp_create_nonce('xepmarket_force_update_check')); ?>" 
+                               onclick="return confirm('Use manual installation? The page will refresh after the update finishes.')"
+                               style="color:rgba(255,255,255,0.2); font-size:10px; text-decoration:none; transition: color 0.3s;"
+                               onmouseover="this.style.color='rgba(255,255,255,0.5)'"
+                               onmouseout="this.style.color='rgba(255,255,255,0.2)'">
+                                <i class="fas fa-exclamation-triangle"></i> Button not working? Click here for Manual Installation (No-JS Fallback)
+                            </a>
+                        </div>
                     </div>
 
                     <script>
                         jQuery(document).ready(function ($) {
-                            $('#xep-run-theme-update').on('click', function () {
-                                if (!confirm('Are you sure you want to update the theme? Downloading and replacing files will take some time.')) return;
+                            // Helper to get AJAX URL
+                            var getAjaxUrl = function () {
+                                if (typeof ajaxurl !== 'undefined') return ajaxurl;
+                                return '/wp-admin/admin-ajax.php';
+                            };
+
+                            $('#xep-run-theme-update').on('click', function (e) {
+                                e.preventDefault();
+
+                                if (!confirm('Are you sure you want to update the theme? This will replace your current theme files with the latest version from GitHub.')) {
+                                    return;
+                                }
 
                                 const $btn = $(this);
                                 const $status = $('#xep-update-status');
                                 const $progressWrap = $('#xep-update-progress');
                                 const $progressBar = $('.xep-update-progress-bar');
+                                const originalBtnHtml = $btn.html();
 
-                                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> DOWNLOADING UPDATE...');
-                                $status.text('Connecting to repository...').css('color', 'var(--admin-primary)');
+                                // Reset and start
+                                $btn.prop('disabled', true).addClass('updating').html('<i class="fas fa-spinner fa-spin"></i> PREPARING UPDATE...');
+                                $status.text('Starting update process...').css('color', 'var(--admin-primary)').fadeIn();
                                 $progressWrap.fadeIn();
+                                $progressBar.css('width', '5%');
 
-                                let progress = 0;
+                                let progress = 5;
                                 const progressInt = setInterval(() => {
-                                    if (progress < 90) {
-                                        progress += Math.random() * 8;
+                                    if (progress < 85) {
+                                        progress += Math.random() * 5;
                                         $progressBar.css('width', progress + '%');
 
-                                        if (progress > 30 && progress < 60) {
-                                            $status.text('Downloading package...');
-                                        } else if (progress >= 60) {
-                                            $status.text('Unpacking and replacing files...');
+                                        if (progress > 20 && progress < 50) {
+                                            $status.text('Contacting GitHub and downloading package...');
+                                        } else if (progress >= 50 && progress < 80) {
+                                            $status.text('Validating package and preparing installation...');
+                                        } else if (progress >= 80) {
+                                            $status.text('Finalizing file replacement (don\'t refresh)...');
                                         }
                                     }
-                                }, 800);
+                                }, 1000);
 
                                 $.ajax({
-                                    url: ajaxurl,
+                                    url: getAjaxUrl(),
                                     type: 'POST',
+                                    cache: false,
                                     data: {
                                         action: 'xep_update_theme',
                                         nonce: $btn.data('nonce')
                                     },
                                     success: function (response) {
                                         clearInterval(progressInt);
-                                        $progressBar.css('width', '100%');
 
                                         if (response.success) {
-                                            $status.text('UPDATE SUCCESSFUL! REFRESHING...').css('color', '#32d74b');
-                                            $btn.html('<i class="fas fa-check"></i> UPDATED').css('background', '#2ecc71');
-                                            setTimeout(() => window.location.reload(), 2000);
+                                            $progressBar.css('width', '100%').css('background', '#32d74b');
+                                            $status.text('UPDATE SUCCESSFUL! REFRESHING PAGE...').css('color', '#32d74b');
+                                            $btn.html('<i class="fas fa-check"></i> VERSION UPDATED').css('background', '#2ecc71');
+
+                                            // Refresh after 2 seconds to show success
+                                            setTimeout(function () {
+                                                window.location.reload();
+                                            }, 2000);
                                         } else {
-                                            $status.text('ERROR: ' + (response.data || 'Failed')).css('color', '#ff453a');
-                                            $btn.prop('disabled', false).html('<i class="fas fa-redo"></i> RETRY UPDATE');
+                                            $progressBar.css('width', '100%').css('background', '#ff453a');
+                                            var errorMsg = response.data || 'Undefined error occurred during update.';
+                                            $status.text('ERROR: ' + errorMsg).css('color', '#ff453a');
+                                            $btn.prop('disabled', false).removeClass('updating').html('<i class="fas fa-redo"></i> TRY AGAIN');
+                                            console.error('XEP Update Error:', errorMsg);
                                         }
                                     },
-                                    error: function () {
+                                    error: function (xhr, status, error) {
                                         clearInterval(progressInt);
-                                        $status.text('System error during update. Check connection.').css('color', '#ff453a');
-                                        $btn.prop('disabled', false).html('<i class="fas fa-redo"></i> RETRY UPDATE');
+                                        $progressBar.css('width', '100%').css('background', '#ff453a');
+                                        $status.text('CONNECTIVITY ERROR! (HTTP ' + xhr.status + ')').css('color', '#ff453a');
+                                        $btn.prop('disabled', false).removeClass('updating').html('<i class="fas fa-redo"></i> RETRY NOW');
+                                        console.error('XEP Update AJAX Error:', status, error);
+                                        alert('Update failed due to a connectivity issue (HTTP ' + xhr.status + '). This might be due to server timeouts or security settings. Try updating manually.');
                                     }
                                 });
                             });
@@ -239,6 +276,38 @@ class XepMarket_Theme_Updater
             error_log("XEP Update Exception: " . $e->getMessage());
             wp_send_json_error('Update failed: ' . $e->getMessage());
         }
+    }
+
+    public function manual_install()
+    {
+        check_admin_referer('xepmarket_force_update_check', 'nonce');
+
+        if (!current_user_can('update_themes')) {
+            wp_die('Permission denied.');
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/misc.php';
+
+        delete_site_transient('update_themes');
+        $this->get_latest_release(true);
+        wp_update_themes();
+
+        $skin = new Automatic_Upgrader_Skin();
+        $upgrader = new Theme_Upgrader($skin);
+        $result = $upgrader->upgrade($this->theme_slug);
+
+        $redirect_to = admin_url('admin.php?page=xepmarket2-settings&manual_update_done=1#tab-updater');
+        
+        if (is_wp_error($result)) {
+            wp_die('Update failed: ' . $result->get_error_message());
+        } elseif ($result === false) {
+            wp_die('Update failed: Upgrader returned false. Please check file permissions (FS_METHOD) or try manual update via Appearance > Themes.');
+        }
+
+        wp_safe_redirect($redirect_to);
+        exit;
     }
 
     public function get_latest_release($force = false)
