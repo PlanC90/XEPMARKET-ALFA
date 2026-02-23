@@ -128,73 +128,75 @@ class XepMarket_Theme_Updater
                         </div>
                     </div>
 
-                    jQuery(document).on('click', '#xep-run-theme-update', function (e) {
-                    e.preventDefault();
-                    var $ = jQuery;
-                    var $btn = $(this);
+                    <script>
+                        jQuery(document).on('click', '#xep-run-theme-update', function (e) {
+                            e.preventDefault();
+                            var $ = jQuery;
+                            var $btn = $(this);
 
-                    console.log('XEP: Update button clicked');
+                            console.log('XEP: Update button clicked');
 
-                    if (!confirm('Are you sure you want to update the theme? This will replace your current theme files with the
-                    latest version from GitHub.')) {
-                    return;
-                    }
+                            if (!confirm('Are you sure you want to update the theme? This will replace your current theme files with the latest version from GitHub.')) {
+                                return;
+                            }
 
-                    const $status = $('#xep-update-status');
-                    const $progressWrap = $('#xep-update-progress');
-                    const $progressBar = $('.xep-update-progress-bar');
+                            const $status = $('#xep-update-status');
+                            const $progressWrap = $('#xep-update-progress');
+                            const $progressBar = $('.xep-update-progress-bar');
 
-                    // Reset and start
-                    $btn.prop('disabled', true).addClass('updating').html('<i class="fas fa-spinner fa-spin"></i> PREPARING...');
-                    $status.text('Starting update process...').css('color', 'var(--admin-primary)').fadeIn();
-                    $progressWrap.fadeIn();
-                    $progressBar.css('width', '5%');
+                            // Reset and start
+                            $btn.prop('disabled', true).addClass('updating').html('<i class="fas fa-spinner fa-spin"></i> PREPARING...');
+                            $status.text('Starting update process...').css('color', 'var(--admin-primary)').fadeIn();
+                            $progressWrap.fadeIn();
+                            $progressBar.css('width', '5%');
 
-                    const ajaxUrl = (typeof ajaxurl !== 'undefined') ? ajaxurl : (window.location.origin +
-                    '/wp-admin/admin-ajax.php');
-                    console.log('XEP: Target AJAX URL:', ajaxUrl);
+                            const ajaxUrl = (typeof ajaxurl !== 'undefined') ? ajaxurl : (window.location.origin + '/wp-admin/admin-ajax.php');
+                            console.log('XEP: Target AJAX URL:', ajaxUrl);
 
-                    let progress = 5;
-                    const progressInt = setInterval(() => {
-                    if (progress < 85) { progress +=Math.random() * 5; $progressBar.css('width', progress + '%' ); if (progress> 20
-                        && progress < 50) $status.text('Downloading package...'); else if (progress>= 50 && progress < 80)
-                                $status.text('Preparing installation...'); else if (progress>= 80) $status.text('Finalizing
-                                files...');
+                            let progress = 5;
+                            const progressInt = setInterval(() => {
+                                if (progress < 85) {
+                                    progress += Math.random() * 5;
+                                    $progressBar.css('width', progress + '%');
+                                    if (progress > 20 && progress < 50) $status.text('Downloading package...');
+                                    else if (progress >= 50 && progress < 80) $status.text('Preparing installation...');
+                                    else if (progress >= 80) $status.text('Finalizing files...');
                                 }
-                                }, 1000);
+                            }, 1000);
 
-                                $.ajax({
+                            $.ajax({
                                 url: ajaxUrl,
                                 type: 'POST',
                                 data: {
-                                action: 'xep_update_theme',
-                                nonce: $btn.data('nonce')
+                                    action: 'xep_update_theme',
+                                    nonce: $btn.data('nonce')
                                 },
                                 success: function (response) {
-                                console.log('XEP: Update response received', response);
-                                clearInterval(progressInt);
-                                if (response.success) {
-                                $progressBar.css('width', '100%').css('background', '#32d74b');
-                                $status.text('SUCCESS! REFRESHING...').css('color', '#32d74b');
-                                $btn.html('<i class="fas fa-check"></i> UPDATED').css('background', '#2ecc71');
-                                setTimeout(() => { window.location.reload(); }, 1500);
-                                } else {
-                                $progressBar.css('width', '100%').css('background', '#ff453a');
-                                $status.text('ERROR: ' + (response.data || 'Unknown error')).css('color', '#ff453a');
-                                $btn.prop('disabled', false).removeClass('updating').html('<i class="fas fa-redo"></i> TRY AGAIN');
-                                }
+                                    console.log('XEP: Update response received', response);
+                                    clearInterval(progressInt);
+                                    if (response.success) {
+                                        $progressBar.css('width', '100%').css('background', '#32d74b');
+                                        $status.text('SUCCESS! REFRESHING...').css('color', '#32d74b');
+                                        $btn.html('<i class="fas fa-check"></i> UPDATED').css('background', '#2ecc71');
+                                        setTimeout(() => { window.location.reload(); }, 1500);
+                                    } else {
+                                        $progressBar.css('width', '100%').css('background', '#ff453a');
+                                        $status.text('ERROR: ' + (response.data || 'Unknown error')).css('color', '#ff453a');
+                                        $btn.prop('disabled', false).removeClass('updating').html('<i class="fas fa-redo"></i> TRY AGAIN');
+                                    }
                                 },
                                 error: function (xhr, status, error) {
-                                console.error('XEP: Update AJAX failure', status, error, xhr.responseText);
-                                clearInterval(progressInt);
-                                $progressBar.css('width', '100%').css('background', '#ff453a');
-                                $status.text('FAILED (HTTP ' + xhr.status + ')').css('color', '#ff453a');
-                                $btn.prop('disabled', false).removeClass('updating').html('<i class="fas fa-redo"></i> RETRY');
-                                alert('Update failed (HTTP ' + xhr.status + '). Check console or use fallback link below.');
+                                    console.error('XEP: Update AJAX failure', status, error, xhr.responseText);
+                                    clearInterval(progressInt);
+                                    $progressBar.css('width', '100%').css('background', '#ff453a');
+                                    $status.text('FAILED (HTTP ' + xhr.status + ')').css('color', '#ff453a');
+                                    $btn.prop('disabled', false).removeClass('updating').html('<i class="fas fa-redo"></i> RETRY');
+                                    alert('Update failed (HTTP ' + xhr.status + '). Check console or use fallback link below.');
                                 }
-                                });
-                                });
-                            <?php endif; ?>
+                            });
+                        });
+                    </script>
+                <?php endif; ?>
             </div>
         </div>
         <?php
