@@ -15,8 +15,9 @@ class XepMarket_Theme_Updater
         $this->theme_slug = 'XEPMARKET-ALFA';
         $this->repo_user = 'PlanC90';
         $this->repo_name = 'XEPMARKET-ALFA';
-        // You can change the GitHub token or repo user/name from options if you want
-        $this->github_url = "https://api.github.com/repos/{$this->repo_user}/{$this->repo_name}/releases/latest";
+
+        // We use tags endpoint as it's more reliable when formal releases aren't created
+        $this->github_url = "https://api.github.com/repos/{$this->repo_user}/{$this->repo_name}/tags";
 
         add_filter('pre_set_site_transient_update_themes', array($this, 'check_update'));
         add_action('admin_post_xepmarket_force_update_check', array($this, 'manual_check'));
@@ -248,7 +249,7 @@ class XepMarket_Theme_Updater
                 'timeout' => 15,
             );
 
-            // Fetch from GitHub
+            // Fetch tags from GitHub
             $response = wp_remote_get($this->github_url, $args);
 
             if (is_wp_error($response)) {
@@ -256,9 +257,15 @@ class XepMarket_Theme_Updater
             }
 
             $body = wp_remote_retrieve_body($response);
-            $release = json_decode($body);
+            $tags = json_decode($body);
 
-            if (!empty($release) && isset($release->tag_name)) {
+            if (!empty($tags) && is_array($tags) && isset($tags[0]->name)) {
+                $latest_tag = $tags[0];
+                $release = (object) array(
+                    'tag_name' => $latest_tag->name,
+                    'zipball_url' => $latest_tag->zipball_url,
+                    'html_url' => "https://github.com/{$this->repo_user}/{$this->repo_name}/tree/{$latest_tag->name}"
+                );
                 set_transient($transient_key, $release, DAY_IN_SECONDS);
             } else {
                 return false;
