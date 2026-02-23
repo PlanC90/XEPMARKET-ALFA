@@ -21,6 +21,7 @@ class XepMarket_Theme_Updater
         add_filter('pre_set_site_transient_update_themes', array($this, 'check_update'));
         add_action('admin_post_xepmarket_force_update_check', array($this, 'manual_check'));
         add_filter('upgrader_source_selection', array($this, 'rename_github_folder'), 10, 4);
+        add_action('wp_ajax_xep_update_theme', array($this, 'ajax_update_theme'));
     }
 
     public function updater_page_html()
@@ -90,14 +91,87 @@ class XepMarket_Theme_Updater
 
                 <?php if ($new_version_available): ?>
                     <div
-                        style="margin-top: 30px; padding: 20px; background: rgba(0,242,255,0.05); border: 1px solid rgba(0,242,255,0.2); border-radius: 12px;">
-                        <h4 style="margin-top:0; color:var(--admin-primary); margin-bottom: 15px;">How to update?</h4>
-                        <p style="font-size: 14px; opacity: 0.8; margin-bottom: 20px;">Go to <strong>Dashboard &gt; Updates</strong>
-                            or <strong>Appearance &gt; Themes</strong> to install the latest version.</p>
-                        <a href="<?php echo esc_url(admin_url('update-core.php')); ?>" class="xep-save-btn"
-                            style="width: auto !important; display: inline-block; background: transparent !important; color: var(--text) !important; border: 1px solid var(--admin-border) !important;">Go
-                            to Updates Page</a>
+                        style="margin-top: 30px; padding: 30px; background: rgba(0,242,255,0.03); border: 1px dashed rgba(0,242,255,0.2); border-radius: 12px; text-align: center;">
+                        <h4 style="margin-top:0; color:var(--admin-primary); margin-bottom: 5px; font-size: 18px;">New Version
+                            Available!</h4>
+                        <p style="font-size: 14px; opacity: 0.8; margin-bottom: 25px;">Version
+                            <strong><?php echo esc_html($latest_version_str); ?></strong> is ready to be installed on your store.
+                        </p>
+
+                        <button type="button" id="xep-run-theme-update" class="xep-save-btn"
+                            data-nonce="<?php echo wp_create_nonce('xepmarket_force_update_check'); ?>"
+                            style="padding: 12px 30px; font-size: 14px; width: auto !important; background: linear-gradient(135deg, var(--admin-primary), #00d2ff) !important; box-shadow: 0 10px 25px rgba(0, 242, 255, 0.2) !important;">
+                            <i class="fas fa-cloud-download-alt"></i> INSTALL UPDATE NOW
+                        </button>
+
+                        <div id="xep-update-status"
+                            style="margin-top: 25px; font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: 1px;">
+                        </div>
+                        <div id="xep-update-progress"
+                            style="display: none; width: 100%; height: 6px; background: rgba(255,255,255,0.05); border-radius: 10px; margin: 15px auto 0; overflow: hidden;">
+                            <div class="xep-update-progress-bar"
+                                style="width: 0%; height: 100%; background: var(--admin-primary); transition: width 0.3s ease;">
+                            </div>
+                        </div>
                     </div>
+
+                    <script>
+                        jQuery(document).ready(function ($) {
+                            $('#xep-run-theme-update').on('click', function () {
+                                if (!confirm('Are you sure you want to update the theme? Downloading and replacing files will take some time.')) return;
+
+                                const $btn = $(this);
+                                const $status = $('#xep-update-status');
+                                const $progressWrap = $('#xep-update-progress');
+                                const $progressBar = $('.xep-update-progress-bar');
+
+                                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> DOWNLOADING UPDATE...');
+                                $status.text('Connecting to repository...').css('color', 'var(--admin-primary)');
+                                $progressWrap.fadeIn();
+
+                                let progress = 0;
+                                const progressInt = setInterval(() => {
+                                    if (progress < 90) {
+                                        progress += Math.random() * 8;
+                                        $progressBar.css('width', progress + '%');
+
+                                        if (progress > 30 && progress < 60) {
+                                            $status.text('Downloading package...');
+                                        } else if (progress >= 60) {
+                                            $status.text('Unpacking and replacing files...');
+                                        }
+                                    }
+                                }, 800);
+
+                                $.ajax({
+                                    url: ajaxurl,
+                                    type: 'POST',
+                                    data: {
+                                        action: 'xep_update_theme',
+                                        nonce: $btn.data('nonce')
+                                    },
+                                    success: function (response) {
+                                        clearInterval(progressInt);
+                                        $progressBar.css('width', '100%');
+
+                                        if (response.success) {
+                                            $status.text('UPDATE SUCCESSFUL! REFRESHING...').css('color', '#32d74b');
+                                            $btn.html('<i class="fas fa-check"></i> UPDATED').css('background', '#2ecc71');
+                                            setTimeout(() => window.location.reload(), 2000);
+                                        } else {
+                                            $status.text('ERROR: ' + (response.data || 'Failed')).css('color', '#ff453a');
+                                            $btn.prop('disabled', false).html('<i class="fas fa-redo"></i> RETRY UPDATE');
+                                        }
+                                    },
+                                    error: function () {
+                                        clearInterval(progressInt);
+                                        $status.text('System error during update. Check connection.').css('color', '#ff453a');
+                                        $btn.prop('disabled', false).html('<i class="fas fa-redo"></i> RETRY UPDATE');
+                                    }
+                                });
+                            });
+                        });
+                    </script>
                 <?php endif; ?>
             </div>
         </div>
@@ -121,6 +195,43 @@ class XepMarket_Theme_Updater
 
         wp_safe_redirect(admin_url('admin.php?page=' . $redirect_to . '&updater_check_done=1#tab-updater'));
         exit;
+    }
+
+    public function ajax_update_theme()
+    {
+        check_ajax_referer('xepmarket_force_update_check', 'nonce');
+
+        if (!current_user_can('update_themes')) {
+            wp_send_json_error('Permission denied. You do not have the right to update themes.');
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/misc.php';
+
+        // Force check updates so package info is refreshed in transient
+        $this->get_latest_release(true);
+        wp_update_themes();
+
+        try {
+            // Using WP_Ajax_Upgrader_Skin to keep simple progress reporting suppressed
+            $skin = new Automatic_Upgrader_Skin();
+            $upgrader = new Theme_Upgrader($skin);
+
+            ob_start();
+            $result = $upgrader->upgrade($this->theme_slug);
+            ob_get_clean();
+
+            if (is_wp_error($result)) {
+                wp_send_json_error($result->get_error_message());
+            } elseif ($result === false) {
+                wp_send_json_error('System rejected the update (possibly folder permission issue). Try standard update via Appearance > Themes.');
+            }
+
+            wp_send_json_success('Theme updated successfully to latest version.');
+        } catch (Exception $e) {
+            wp_send_json_error('Update failed: ' . $e->getMessage());
+        }
     }
 
     public function get_latest_release($force = false)
