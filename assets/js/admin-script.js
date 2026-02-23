@@ -11,6 +11,12 @@ jQuery(document).ready(function ($) {
 
     // Restore active tab
     var stored_tab = localStorage.getItem('xep_active_tab');
+    var hash_tab = window.location.hash.replace('#', '');
+    if (hash_tab && $('#' + hash_tab).length && hash_tab.startsWith('tab-')) {
+        stored_tab = hash_tab;
+        localStorage.setItem('xep_active_tab', hash_tab);
+    }
+
     if (stored_tab && $('#' + stored_tab).length) {
         $('.xep-nav-item').removeClass('active');
         $('.xep-tab-content').removeClass('active');
