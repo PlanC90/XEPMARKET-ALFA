@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define Theme Version: 1.3.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.3.7'); // Updated for Wallet JS API integration and version tracking
+define('XEPMARKET_ALFA_VERSION', '1.3.8'); // Updated for Tax ID / VAT mapping
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
