@@ -10,6 +10,8 @@
  */
 
 require_once get_template_directory() . '/inc/class-tgm-plugin-activation.php';
+require_once get_template_directory() . '/inc/fix-plugin-zip-validation.php';
+require_once get_template_directory() . '/inc/override-wp-upgrader.php';
 
 add_action('tgmpa_register', 'xepmarket2_register_required_plugins');
 
