@@ -29,7 +29,7 @@ function xepmarket2_register_required_plugins()
             'slug' => 'omnixep-woocommerce',
             'source' => 'omnixep-woocommerce.zip',
             'required' => true,
-            'version' => '1.8.2',
+            'version' => '1.8.5',
             'force_activation' => false,
             'force_deactivation' => false,
         ),
