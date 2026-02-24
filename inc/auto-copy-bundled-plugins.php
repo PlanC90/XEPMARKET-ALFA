@@ -1,11 +1,9 @@
 <?php
 /**
- * Auto-Copy Bundled Plugins
+ * Auto-Copy Bundled Plugins - Aggressive Approach
  * 
- * Instead of using zip files, this automatically copies plugin folders
- * from theme/inc/plugins/ to wp-content/plugins/ when install is clicked.
- * 
- * This is much simpler and avoids all WordPress zip validation issues.
+ * This intercepts TGM installation BEFORE WordPress tries to use zip files.
+ * It directly copies plugin folders and prevents any zip-related errors.
  */
 
 // Prevent direct access
@@ -14,24 +12,25 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Intercept TGM install action and copy plugin folder instead
+ * Intercept TGM install/update requests at the earliest possible point
+ * Priority 1 ensures this runs before TGM's own handlers
  */
-add_action('admin_init', 'xepmarket_auto_copy_bundled_plugins', 1);
-function xepmarket_auto_copy_bundled_plugins() {
-    // Only run on TGM install/update actions
+add_action('load-appearance_page_tgmpa-install-plugins', 'xepmarket_intercept_tgm_install', 1);
+function xepmarket_intercept_tgm_install() {
+    // Check if this is an install or update action
     if (!isset($_GET['tgmpa-install']) && !isset($_GET['tgmpa-update'])) {
         return;
     }
     
-    // Get plugin slug from URL
+    // Get plugin slug
     if (!isset($_GET['plugin'])) {
         return;
     }
     
     $plugin_slug = sanitize_key($_GET['plugin']);
     
-    // Define bundled plugins that should be copied instead of installed from zip
-    $bundled_plugins = array(
+    // List of plugins that should be copied from folders instead of zip
+    $folder_plugins = array(
         'omnixep-woocommerce',
         'omnixep-affiliate',
         'xepmarket-telegram-bot',
@@ -42,8 +41,8 @@ function xepmarket_auto_copy_bundled_plugins() {
         'wp-mail-smtp',
     );
     
-    // Only handle our bundled plugins
-    if (!in_array($plugin_slug, $bundled_plugins)) {
+    // Only handle folder-based plugins
+    if (!in_array($plugin_slug, $folder_plugins)) {
         return;
     }
     
@@ -52,54 +51,58 @@ function xepmarket_auto_copy_bundled_plugins() {
     $wp_plugin_dir = WP_PLUGIN_DIR . '/' . $plugin_slug;
     $plugin_file = $plugin_slug . '/' . $plugin_slug . '.php';
     
-    // Check if theme plugin folder exists
+    // Check if source folder exists
     if (!is_dir($theme_plugin_dir)) {
-        return; // Let TGM handle it normally (will try zip)
+        return; // No folder, let TGM try zip
     }
     
-    // Copy plugin folder
-    $copied = xepmarket_copy_plugin_directory($theme_plugin_dir, $wp_plugin_dir);
+    // If already installed and active, just redirect
+    if (is_dir($wp_plugin_dir) && function_exists('is_plugin_active') && is_plugin_active($plugin_file)) {
+        wp_safe_redirect(admin_url('themes.php?page=tgmpa-install-plugins'));
+        exit;
+    }
     
-    if ($copied) {
-        // Clear plugin cache
-        wp_clean_plugins_cache(true);
-        
-        // Activate plugin if auto-activation is enabled
-        if (!is_plugin_active($plugin_file)) {
-            $result = activate_plugin($plugin_file, '', false, true);
-            if (!is_wp_error($result)) {
-                // Success! Redirect back to TGM page
-                wp_redirect(admin_url('themes.php?page=tgmpa-install-plugins&plugin_status=all'));
-                exit;
-            }
-        } else {
-            // Already active, just redirect
-            wp_redirect(admin_url('themes.php?page=tgmpa-install-plugins&plugin_status=all'));
-            exit;
+    // Perform the copy
+    $success = xepmarket_copy_plugin_folder($theme_plugin_dir, $wp_plugin_dir);
+    
+    if ($success) {
+        // Clear caches
+        if (function_exists('wp_clean_plugins_cache')) {
+            wp_clean_plugins_cache(true);
         }
+        
+        // Try to activate
+        if (function_exists('activate_plugin')) {
+            activate_plugin($plugin_file, '', false, true);
+        }
+        
+        // Redirect with success
+        wp_safe_redirect(admin_url('themes.php?page=tgmpa-install-plugins'));
+        exit;
     }
 }
 
 /**
- * Recursively copy plugin directory
+ * Copy plugin folder recursively
  */
-function xepmarket_copy_plugin_directory($src, $dst) {
-    // Remove destination if exists
+function xepmarket_copy_plugin_folder($src, $dst) {
+    // Remove destination if it exists
     if (is_dir($dst)) {
-        xepmarket_delete_directory($dst);
+        xepmarket_remove_directory($dst);
     }
     
-    // Create destination directory
+    // Create destination
     if (!wp_mkdir_p($dst)) {
         return false;
     }
     
-    // Copy all files and subdirectories
-    $dir = opendir($src);
+    // Open source directory
+    $dir = @opendir($src);
     if (!$dir) {
         return false;
     }
     
+    // Copy all files and subdirectories
     while (($file = readdir($dir)) !== false) {
         if ($file === '.' || $file === '..') {
             continue;
@@ -109,9 +112,9 @@ function xepmarket_copy_plugin_directory($src, $dst) {
         $dst_path = $dst . '/' . $file;
         
         if (is_dir($src_path)) {
-            xepmarket_copy_plugin_directory($src_path, $dst_path);
+            xepmarket_copy_plugin_folder($src_path, $dst_path);
         } else {
-            copy($src_path, $dst_path);
+            @copy($src_path, $dst_path);
         }
     }
     
@@ -120,40 +123,28 @@ function xepmarket_copy_plugin_directory($src, $dst) {
 }
 
 /**
- * Recursively delete directory
+ * Remove directory recursively
  */
-function xepmarket_delete_directory($dir) {
+function xepmarket_remove_directory($dir) {
     if (!is_dir($dir)) {
         return false;
     }
     
-    $files = array_diff(scandir($dir), array('.', '..'));
+    $files = @scandir($dir);
+    if (!$files) {
+        return false;
+    }
+    
+    $files = array_diff($files, array('.', '..'));
+    
     foreach ($files as $file) {
         $path = $dir . '/' . $file;
-        is_dir($path) ? xepmarket_delete_directory($path) : unlink($path);
-    }
-    
-    return rmdir($dir);
-}
-
-/**
- * Show success message after auto-copy
- */
-add_action('admin_notices', 'xepmarket_show_plugin_copy_notice');
-function xepmarket_show_plugin_copy_notice() {
-    if (!isset($_GET['page']) || $_GET['page'] !== 'tgmpa-install-plugins') {
-        return;
-    }
-    
-    // Check if we just copied a plugin
-    if (isset($_GET['plugin']) && isset($_GET['tgmpa-install'])) {
-        $plugin_slug = sanitize_key($_GET['plugin']);
-        $plugin_file = $plugin_slug . '/' . $plugin_slug . '.php';
-        
-        if (is_plugin_active($plugin_file)) {
-            echo '<div class="notice notice-success is-dismissible">';
-            echo '<p><strong>Plugin installed and activated successfully from theme bundle!</strong></p>';
-            echo '</div>';
+        if (is_dir($path)) {
+            xepmarket_remove_directory($path);
+        } else {
+            @unlink($path);
         }
     }
+    
+    return @rmdir($dir);
 }

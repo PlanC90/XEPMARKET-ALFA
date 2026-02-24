@@ -1,0 +1,9 @@
+*.bat
+.DS_Store
+Thumbs.db
+node_modules/
+.git/
+push_error.txt
+inc/plugins/*/
+!inc/plugins/*.zip
+!inc/plugins/README.md
