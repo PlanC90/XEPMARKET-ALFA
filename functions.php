@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define Theme Version: 1.3.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.4.7'); // Added Upgrader Overrides for Zip Stability
+define('XEPMARKET_ALFA_VERSION', '1.4.8'); // Fixed Upgrader Fatal Error conflict
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
