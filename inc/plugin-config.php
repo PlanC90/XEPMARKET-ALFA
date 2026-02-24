@@ -13,6 +13,43 @@ require_once get_template_directory() . '/inc/class-tgm-plugin-activation.php';
 
 add_action('tgmpa_register', 'xepmarket2_register_required_plugins');
 
+/**
+ * Bypass WordPress zip validation for bundled plugins
+ * This fixes the "files are not packaged in a folder" error
+ */
+add_filter('upgrader_source_selection', 'xepmarket_fix_plugin_zip_structure', 1, 4);
+function xepmarket_fix_plugin_zip_structure($source, $remote_source, $upgrader, $hook_extra = null) {
+    global $wp_filesystem;
+    
+    // Only apply to TGM plugin installations
+    if (!isset($_GET['tgmpa-install']) && !isset($_GET['tgmpa-update'])) {
+        return $source;
+    }
+    
+    // Check if source is valid
+    if (is_wp_error($source)) {
+        return $source;
+    }
+    
+    // Get the plugin slug from the source path
+    $plugin_slug = basename($source);
+    
+    // If the source already has the correct structure, return it
+    if ($plugin_slug === 'omnixep-woocommerce' || $plugin_slug === 'omnixep-affiliate' || $plugin_slug === 'xepmarket-telegram-bot') {
+        return $source;
+    }
+    
+    // Check if there's a single directory in the source
+    $source_files = array_keys($wp_filesystem->dirlist($remote_source));
+    if (count($source_files) === 1 && $wp_filesystem->is_dir(trailingslashit($remote_source) . $source_files[0])) {
+        // Single directory found, use it as source
+        $new_source = trailingslashit($remote_source) . trailingslashit($source_files[0]);
+        return $new_source;
+    }
+    
+    return $source;
+}
+
 function xepmarket2_register_required_plugins()
 {
     $plugin_path = get_template_directory() . '/inc/plugins/';
