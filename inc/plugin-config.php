@@ -13,6 +13,20 @@ require_once get_template_directory() . '/inc/class-tgm-plugin-activation.php';
 
 add_action('tgmpa_register', 'xepmarket2_register_required_plugins');
 
+/**
+ * Modül listesinde "Güncelleme mevcut" için beklenen sürümü döndürür.
+ * OmniXEP Gateway ve Telegram Bot için tema sürümü kullanılır (senkron).
+ */
+function xepmarket2_get_plugin_expected_version($slug)
+{
+    $theme_version = wp_get_theme(get_template())->get('Version');
+    $use_theme_version = array('omnixep-woocommerce', 'xepmarket-telegram-bot');
+    if (in_array($slug, $use_theme_version, true) && $theme_version) {
+        return $theme_version;
+    }
+    return null;
+}
+
 function xepmarket2_register_required_plugins()
 {
     $plugin_path = get_template_directory() . '/inc/plugins/';
@@ -29,7 +43,7 @@ function xepmarket2_register_required_plugins()
             'slug' => 'omnixep-woocommerce',
             'source' => 'omnixep-woocommerce.zip',
             'required' => true,
-            'version' => '1.8.2',
+            'version' => xepmarket2_get_plugin_expected_version('omnixep-woocommerce'),
             'force_activation' => false,
             'force_deactivation' => false,
         ),
@@ -44,7 +58,7 @@ function xepmarket2_register_required_plugins()
             'slug' => 'xepmarket-telegram-bot',
             'source' => 'xepmarket-telegram-bot.zip',
             'required' => false,
-            'version' => '1.0.0',
+            'version' => xepmarket2_get_plugin_expected_version('xepmarket-telegram-bot'),
         ),
 
         // ── Bundled Modules (Recommended) ──

@@ -96,7 +96,7 @@ function xepmarket2_sync_plugins_from_github()
     }
 
     $out = ['updated' => [], 'installed' => [], 'skipped' => [], 'errors' => []];
-    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github'];
+    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2'];
 
     foreach (scandir($repo_root) as $name) {
         if ($name === '.' || $name === '..' || in_array($name, $skip_names, true)) {

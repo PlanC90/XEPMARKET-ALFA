@@ -16,8 +16,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 1.8.3 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.8.3');
+// Define Theme Version: 1.8.5 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '1.8.5');
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
@@ -2091,6 +2091,7 @@ function xepmarket2_settings_page()
                             $all_plugins = get_plugins();
 
                             foreach ($required_plugins as $plug):
+                                $update_available = false;
                                 if (isset($plug['type']) && $plug['type'] === 'core') {
                                     $is_installed = true;
                                     $is_active = true;
@@ -2118,6 +2119,13 @@ function xepmarket2_settings_page()
                                     if (!$is_installed && file_exists(WP_PLUGIN_DIR . '/' . $plug['slug'])) {
                                         $is_installed = true;
                                     }
+
+                                    // Güncelleme kontrolü: kurulu sürüm < temadaki beklenen sürüm
+                                    $update_available = false;
+                                    $expected_version = function_exists('xepmarket2_get_plugin_expected_version') ? xepmarket2_get_plugin_expected_version($plug['slug']) : null;
+                                    if ($is_installed && $expected_version && !empty($plugin_path) && isset($all_plugins[$plugin_path]['Version'])) {
+                                        $update_available = version_compare($all_plugins[$plugin_path]['Version'], $expected_version, '<');
+                                    }
                                 }
                                 ?>
                                 <div class="xep-form-group"
@@ -2142,7 +2150,9 @@ function xepmarket2_settings_page()
                                             </div>
                                             <div class="status-indicator"
                                                 style="margin-top: 4px; font-size: 12px; opacity: 0.8;">
-                                                <?php if ($is_active): ?>
+                                                <?php if ($update_available): ?>
+                                                    <span style="color: #ff9f0a;"><i class="fas fa-arrow-circle-up"></i> Update available (<?php echo esc_html($expected_version); ?>)</span>
+                                                <?php elseif ($is_active): ?>
                                                     <span style="color: #32d74b;"><i class="fas fa-circle-check"></i>
                                                         Activated</span>
                                                 <?php elseif ($is_installed): ?>
@@ -2155,7 +2165,11 @@ function xepmarket2_settings_page()
                                     </div>
 
                                     <div class="plugin-action">
-                                        <?php if (isset($plug['type']) && $plug['type'] === 'core'): ?>
+                                        <?php if ($update_available): ?>
+                                            <a href="<?php echo esc_url(admin_url('themes.php?page=tgmpa-install-plugins')); ?>"
+                                                class="xep-save-btn"
+                                                style="padding: 6px 15px !important; font-size: 11px !important; width: auto !important; background: linear-gradient(135deg, #238636, #2ea043) !important; box-shadow: 0 4px 10px rgba(35, 134, 54, 0.3) !important;">UPDATE</a>
+                                        <?php elseif (isset($plug['type']) && $plug['type'] === 'core'): ?>
                                             <a href="<?php echo admin_url('admin.php?page=ali-sync-helper'); ?>"
                                                 class="xep-save-btn"
                                                 style="padding: 6px 15px !important; font-size: 11px !important; width: auto !important; background: linear-gradient(135deg, #6366f1, #a855f7) !important; box-shadow: 0 4px 10px rgba(99, 102, 241, 0.2) !important;">DASHBOARD</a>
@@ -2711,10 +2725,11 @@ function xepmarket2_settings_page()
                         if (res.success && res.data) {
                             var d = res.data;
                             var msg = [];
-                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.join(', '));
-                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.join(', '));
+                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.length + ' plugin(s)');
+                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.length + ' plugin(s)');
                             if (d.errors && d.errors.length) msg.push('Errors: ' + d.errors.join('; '));
-                            alert(msg.length ? msg.join('\n') : 'Sync completed.');
+                            var text = msg.length ? msg.join(' • ') : 'Sync completed.';
+                            alert(text + '\n\nRefreshing page...');
                             window.location.reload();
                         } else {
                             alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown'));

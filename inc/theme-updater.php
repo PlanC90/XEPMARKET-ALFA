@@ -3,6 +3,60 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+/**
+ * Tema güncellendikten sonra OmniXEP ve Telegram Bot eklentilerinin sürümlerini
+ * aktif tema sürümüyle eşitler (Modüller sekmesinde "güncel" görünsün).
+ */
+function xepmarket2_sync_plugin_versions_to_theme()
+{
+    $theme = wp_get_theme(get_template());
+    $version = $theme ? $theme->get('Version') : '';
+    if (empty($version)) {
+        return;
+    }
+
+    $plugins_dir = WP_PLUGIN_DIR;
+    $version_esc = preg_quote($version, '/');
+
+    // OmniXEP: ana dosya (Version header + tüm plugin_version)
+    $omni_main = $plugins_dir . '/omnixep-woocommerce/omnixep-woocommerce.php';
+    if (is_readable($omni_main) && is_writable($omni_main)) {
+        $content = file_get_contents($omni_main);
+        if ($content !== false) {
+            $content = preg_replace('/\* Version: \S+/', '* Version: ' . $version, $content);
+            $content = preg_replace("/'plugin_version'\s*=>\s*'[^']*'/", "'plugin_version' => '" . str_replace("'", "\\'", $version) . "'", $content);
+            @file_put_contents($omni_main, $content);
+        }
+    }
+
+    // OmniXEP: gateway sınıfı
+    $omni_class = $plugins_dir . '/omnixep-woocommerce/includes/class-wc-gateway-omnixep.php';
+    if (is_readable($omni_class) && is_writable($omni_class)) {
+        $content = file_get_contents($omni_class);
+        if ($content !== false) {
+            $content = preg_replace("/'plugin_version'\s*=>\s*'[^']*'/", "'plugin_version' => '" . str_replace("'", "\\'", $version) . "'", $content);
+            @file_put_contents($omni_class, $content);
+        }
+    }
+
+    // Telegram Bot: olası ana dosya yolları
+    $tg_paths = array(
+        $plugins_dir . '/xepmarket-telegram-bot/xepmarket-telegram-bot/xepmarket-telegram-bot.php',
+        $plugins_dir . '/xepmarket-telegram-bot/xepmarket-telegram-bot.php',
+        $plugins_dir . '/xepmarket-telegram-bot-2/xepmarket-telegram-bot.php',
+    );
+    foreach ($tg_paths as $path) {
+        if (is_readable($path) && is_writable($path)) {
+            $content = file_get_contents($path);
+            if ($content !== false) {
+                $content = preg_replace('/\* Version: \S+/', '* Version: ' . $version, $content);
+                @file_put_contents($path, $content);
+            }
+            break;
+        }
+    }
+}
+
 class XepMarket_Theme_Updater
 {
     public $repo_user;
@@ -51,13 +105,13 @@ class XepMarket_Theme_Updater
                 style="background: rgba(255,255,255,0.02); padding: 30px; border-radius: 12px; border: 1px solid var(--admin-border); max-width: 600px;">
                 <table class="form-table">
                     <tr>
-                        <th scope="row"><label>Current Version:</label></th>
+                        <th scope="row" style="color: #fff; font-weight: 600;"><label style="color: #fff;">Current Version:</label></th>
                         <td><strong style="font-size: 16px;">
                                 <?php echo esc_html($current_version); ?>
                             </strong></td>
                     </tr>
                     <tr>
-                        <th scope="row"><label>Latest GitHub Version:</label></th>
+                        <th scope="row" style="color: #fff; font-weight: 600;"><label style="color: #fff;">Latest GitHub Version:</label></th>
                         <td>
                             <strong style="font-size: 16px;">
                                 <?php echo esc_html($latest_version_str); ?>
@@ -257,6 +311,10 @@ class XepMarket_Theme_Updater
             }
 
             error_log("XEP Update Success!");
+            xepmarket2_sync_plugin_versions_to_theme();
+            wp_clean_themes_cache();
+            delete_site_transient('update_themes');
+            delete_transient('xepmarket2_github_release');
             wp_send_json_success('Theme updated successfully to latest version.');
         } catch (Exception $e) {
             error_log("XEP Update Exception: " . $e->getMessage());
@@ -292,6 +350,10 @@ class XepMarket_Theme_Updater
             wp_die('Update failed: Upgrader returned false. Please check file permissions (FS_METHOD) or try manual update via Appearance > Themes.');
         }
 
+        xepmarket2_sync_plugin_versions_to_theme();
+        wp_clean_themes_cache();
+        delete_site_transient('update_themes');
+        delete_transient('xepmarket2_github_release');
         wp_safe_redirect($redirect_to);
         exit;
     }
