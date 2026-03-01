@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define Theme Version: 1.3.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', ''); // Post Fatal-Error Stability Release
+define('XEPMARKET_ALFA_VERSION', '1.3.5'); // Updated for Telegram Bot Integration & Auto-Updater fixes
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
@@ -128,8 +128,25 @@ function xepmarket2_setup()
 add_action('after_setup_theme', 'xepmarket2_setup');
 
 /**
- * Enqueue WooCommerce Gallery Scripts
+ * Fallback when no menu is assigned to Primary location. Shows Home, Shop, Swap.
  */
+function xepmarket2_menu_fallback($args)
+{
+    $args = (object) $args;
+    $menu_class = !empty($args->menu_class) ? $args->menu_class : 'menu';
+    $shop_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('shop') : home_url('/shop/');
+    $swap_url = home_url('/swap/');
+    $items = array(
+        array('title' => __('Home', 'xepmarket2'), 'url' => home_url('/')),
+        array('title' => __('Shop', 'xepmarket2'), 'url' => $shop_url),
+        array('title' => __('Swap', 'xepmarket2'), 'url' => $swap_url),
+    );
+    echo '<ul id="primary-menu" class="' . esc_attr($menu_class) . '">';
+    foreach ($items as $item) {
+        echo '<li><a href="' . esc_url($item['url']) . '">' . esc_html($item['title']) . '</a></li>';
+    }
+    echo '</ul>';
+}
 function xepmarket2_enqueue_gallery_scripts()
 {
     if (function_exists('is_product') && is_product()) {
@@ -459,7 +476,9 @@ add_filter('loop_shop_columns', function () {
  */
 add_filter('loop_shop_per_page', function ($cols) {
     if (isset($_GET['ppp'])) {
-        return intval($_GET['ppp']);
+        $ppp = intval($_GET['ppp']);
+        // Security: cap to prevent heavy queries (DoS)
+        return min(max($ppp, 1), 100);
     }
     return 25; // Default for Alpha theme
 }, 9999);

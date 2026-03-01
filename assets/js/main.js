@@ -370,19 +370,60 @@
             }
         }
 
-        // 10. SALE CAROUSEL LOGIC
+        // 10. SALE CAROUSEL LOGIC — sonsuz döngü; mobilde tek ürün
         var $saleCarousel = $('.sale-carousel-wrapper ul.products');
         if ($saleCarousel.length) {
+            var el = $saleCarousel[0];
+            var getItemWidth = function () {
+                var w = $saleCarousel.find('li.product').first().outerWidth(true);
+                return (w && w > 0) ? w : 300;
+            };
+            var hasScroll = function () { return el.scrollWidth > el.clientWidth + 2; };
+            var isAtStart = function () { return el.scrollLeft <= 2; };
+            var isAtEnd = function () { return el.scrollLeft >= el.scrollWidth - el.clientWidth - 2; };
+
+            var programmaticScroll = false;
             $('.sale-next').on('click', function (e) {
                 e.preventDefault();
-                var itemWidth = $saleCarousel.find('li.product').first().outerWidth(true) || 300;
-                $saleCarousel[0].scrollBy({ left: itemWidth, behavior: 'smooth' });
+                if (!hasScroll()) return;
+                programmaticScroll = true;
+                var itemWidth = getItemWidth();
+                if (isAtEnd()) {
+                    el.scrollLeft = 0;
+                } else {
+                    el.scrollBy({ left: itemWidth, behavior: 'smooth' });
+                }
             });
             $('.sale-prev').on('click', function (e) {
                 e.preventDefault();
-                var itemWidth = $saleCarousel.find('li.product').first().outerWidth(true) || 300;
-                $saleCarousel[0].scrollBy({ left: -itemWidth, behavior: 'smooth' });
+                if (!hasScroll()) return;
+                programmaticScroll = true;
+                var itemWidth = getItemWidth();
+                if (isAtStart()) {
+                    el.scrollLeft = el.scrollWidth - el.clientWidth;
+                } else {
+                    el.scrollBy({ left: -itemWidth, behavior: 'smooth' });
+                }
             });
+
+            // Scroll sonunda sonsuz döngü: sadece kullanıcı elle kaydırdığında sarma; butonla kaydırmada üründe kal
+            var scrollEndTimer;
+            var justWrapped = false;
+            el.addEventListener('scroll', function () {
+                clearTimeout(scrollEndTimer);
+                scrollEndTimer = setTimeout(function () {
+                    if (justWrapped) { justWrapped = false; return; }
+                    if (programmaticScroll) { programmaticScroll = false; return; }
+                    if (!hasScroll()) return;
+                    if (el.scrollLeft >= el.scrollWidth - el.clientWidth - 2) {
+                        el.scrollLeft = 0;
+                        justWrapped = true;
+                    } else if (el.scrollLeft <= 2) {
+                        el.scrollLeft = el.scrollWidth - el.clientWidth;
+                        justWrapped = true;
+                    }
+                }, 250);
+            }, { passive: true });
         }
 
     });

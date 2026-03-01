@@ -289,7 +289,7 @@ function xepmarket2_factory_reset()
     global $wpdb;
 
     // 1. Delete ALL theme options
-    $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE 'xepmarket2_%'");
+    $wpdb->query($wpdb->prepare("DELETE FROM $wpdb->options WHERE option_name LIKE %s", 'xepmarket2_%'));
 
     // 2. Delete Demo Menus
     $menu_name = 'Main Menu';

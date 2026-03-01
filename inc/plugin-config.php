@@ -10,7 +10,6 @@
  */
 
 require_once get_template_directory() . '/inc/class-tgm-plugin-activation.php';
-require_once get_template_directory() . '/inc/auto-copy-bundled-plugins.php';
 
 add_action('tgmpa_register', 'xepmarket2_register_required_plugins');
 
@@ -30,7 +29,7 @@ function xepmarket2_register_required_plugins()
             'slug' => 'omnixep-woocommerce',
             'source' => 'omnixep-woocommerce.zip',
             'required' => true,
-            'version' => '1.8.8',
+            'version' => '1.8.2',
             'force_activation' => false,
             'force_deactivation' => false,
         ),

@@ -48,14 +48,17 @@ class XEPMarket_Ali_Sync_Helper
      */
     public function handle_manual_cleanup()
     {
-        // URL-based cleanup: ?xep_action=delete_broken
+        // URL-based cleanup: ?xep_action=delete_broken (requires nonce to prevent CSRF)
         if (isset($_GET['xep_action']) && $_GET['xep_action'] === 'delete_broken') {
             if (!current_user_can('manage_options')) {
                 wp_die('Unauthorized.');
             }
+            if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'xep_delete_broken')) {
+                wp_die('Security check failed. Use the button on the Ali Sync page.');
+            }
 
             $count = $this->run_cleanup_all();
-            wp_die("<h3>Cleanup Completed</h3><p>Successfully deleted <strong>$count</strong> broken products/variations.</p><a href='" . admin_url('admin.php?page=' . $this->slug) . "'>&larr; Back to Dashboard</a>");
+            wp_die("<h3>Cleanup Completed</h3><p>Successfully deleted <strong>$count</strong> broken products/variations.</p><a href='" . esc_url(admin_url('admin.php?page=' . $this->slug)) . "'>&larr; Back to Dashboard</a>");
         }
 
         // PHP Form-based delete (POST from admin page)
