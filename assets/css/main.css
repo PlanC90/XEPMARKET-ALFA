@@ -8499,19 +8499,20 @@ body.search-open {
     scroll-snap-align: start !important;
 }
 
-/* Mobilde tek ürün (768px altı) */
+/* Tablet: 3 ürün (1024px altı, mobil değil) */
+@media (max-width: 1024px) {
+    .sale-carousel-wrapper ul.products>li.product {
+        flex: 0 0 calc(33.333% - 14px) !important;
+        max-width: calc(33.333% - 14px) !important;
+    }
+}
+
+/* Mobil: tek ürün + sağ/sol oklar (768px altı) */
 @media (max-width: 768px) {
     .sale-carousel-wrapper ul.products>li.product {
         flex: 0 0 100% !important;
         max-width: 100% !important;
         scroll-snap-align: center !important;
-    }
-}
-
-@media (max-width: 1024px) {
-    .sale-carousel-wrapper ul.products>li.product {
-        flex: 0 0 calc(33.333% - 14px) !important;
-        max-width: calc(33.333% - 14px) !important;
     }
 }
 
