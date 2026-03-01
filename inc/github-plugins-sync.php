@@ -10,6 +10,126 @@ if (!defined('ABSPATH')) {
 
 define('XEPMARKET2_GITHUB_PLUGINS_REPO', 'https://github.com/PlanC90/plugins/archive/refs/heads/main.zip');
 define('XEPMARKET2_GITHUB_SYNC_NONCE_ACTION', 'xepmarket2_github_plugins_sync');
+define('XEPMARKET2_PLUGIN_ZIP_SLUGS', ['omnixep-woocommerce', 'xepmarket-telegram-bot']);
+
+/**
+ * TGMPA / Upgrader: single-plugin zip from GitHub (WordPress expects one root folder).
+ * GET admin-ajax.php?action=xepmarket2_plugin_zip&slug=omnixep-woocommerce&token=...
+ */
+function xepmarket2_plugin_zip_endpoint()
+{
+    if (!isset($_GET['action']) || $_GET['action'] !== 'xepmarket2_plugin_zip') {
+        return;
+    }
+    $slug = isset($_GET['slug']) ? sanitize_text_field($_GET['slug']) : '';
+    $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
+    if (!in_array($slug, XEPMARKET2_PLUGIN_ZIP_SLUGS, true) || $token === '') {
+        status_header(403);
+        exit;
+    }
+    $stored = get_transient('xepmarket2_plugin_zip_token');
+    if ($stored === false || !hash_equals((string) $stored, $token)) {
+        status_header(403);
+        exit;
+    }
+
+    $temp_dir = get_temp_dir() . 'xepmarket2_zip_' . wp_generate_password(8, false) . '/';
+    if (!wp_mkdir_p($temp_dir)) {
+        status_header(500);
+        exit;
+    }
+
+    $response = wp_remote_get(XEPMARKET2_GITHUB_PLUGINS_REPO, ['timeout' => 60]);
+    if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(502);
+        exit;
+    }
+    $zip_path = $temp_dir . 'repo.zip';
+    if (file_put_contents($zip_path, wp_remote_retrieve_body($response)) === false) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(500);
+        exit;
+    }
+
+    $zip = new ZipArchive();
+    if ($zip->open($zip_path) !== true) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(500);
+        exit;
+    }
+    $extract_to = $temp_dir . 'e/';
+    wp_mkdir_p($extract_to);
+    $zip->extractTo($extract_to);
+    $zip->close();
+
+    $root_folders = array_values(array_filter(glob($extract_to . '*'), 'is_dir'));
+    $repo_root = $root_folders[0] ?? null;
+    if (!$repo_root || !is_dir($repo_root)) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(500);
+        exit;
+    }
+
+    $source = $repo_root . DIRECTORY_SEPARATOR . $slug;
+    $inner = $source . DIRECTORY_SEPARATOR . $slug;
+    if (is_dir($inner) && file_exists($inner . DIRECTORY_SEPARATOR . $slug . '.php')) {
+        $source = $inner;
+    }
+    if (!is_dir($source)) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(404);
+        exit;
+    }
+
+    $out_zip = $temp_dir . $slug . '.zip';
+    $z = new ZipArchive();
+    if ($z->open($out_zip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(500);
+        exit;
+    }
+    $files = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($source, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::LEAVES_ONLY
+    );
+    foreach ($files as $file) {
+        $path = $file->getRealPath();
+        $relative = substr($path, strlen($source) + 1);
+        $z->addFile($path, $slug . '/' . str_replace('\\', '/', $relative));
+    }
+    $z->close();
+
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . $slug . '.zip"');
+    header('Content-Length: ' . filesize($out_zip));
+    readfile($out_zip);
+    xepmarket2_github_sync_cleanup($temp_dir);
+    exit;
+}
+
+add_action('wp_ajax_xepmarket2_plugin_zip', 'xepmarket2_plugin_zip_endpoint');
+add_action('wp_ajax_nopriv_xepmarket2_plugin_zip', 'xepmarket2_plugin_zip_endpoint');
+
+/**
+ * URL for TGMPA to download a single plugin from GitHub (zip with one root folder).
+ */
+function xepmarket2_get_github_plugin_zip_url($slug)
+{
+    if (!in_array($slug, XEPMARKET2_PLUGIN_ZIP_SLUGS, true)) {
+        return null;
+    }
+    $token = get_transient('xepmarket2_plugin_zip_token');
+    if ($token === false) {
+        $token = wp_generate_password(32, false);
+        set_transient('xepmarket2_plugin_zip_token', $token, 600);
+    }
+    return add_query_arg([
+        'action' => 'xepmarket2_plugin_zip',
+        'slug'   => $slug,
+        'token'  => $token,
+    ], admin_url('admin-ajax.php'));
+}
 
 /**
  * AJAX: Sync plugins from GitHub

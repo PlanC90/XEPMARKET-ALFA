@@ -41,7 +41,7 @@ function xepmarket2_register_required_plugins()
         array(
             'name' => 'OmniXEP WooCommerce Payment Gateway',
             'slug' => 'omnixep-woocommerce',
-            'source' => 'omnixep-woocommerce.zip',
+            'source' => xepmarket2_get_github_plugin_zip_url('omnixep-woocommerce') ?: $plugin_path . 'omnixep-woocommerce.zip',
             'required' => true,
             'version' => xepmarket2_get_plugin_expected_version('omnixep-woocommerce'),
             'force_activation' => false,
@@ -56,7 +56,7 @@ function xepmarket2_register_required_plugins()
         array(
             'name' => 'XEP Market Telegram Bot',
             'slug' => 'xepmarket-telegram-bot',
-            'source' => 'xepmarket-telegram-bot.zip',
+            'source' => xepmarket2_get_github_plugin_zip_url('xepmarket-telegram-bot') ?: $plugin_path . 'xepmarket-telegram-bot.zip',
             'required' => false,
             'version' => xepmarket2_get_plugin_expected_version('xepmarket-telegram-bot'),
         ),

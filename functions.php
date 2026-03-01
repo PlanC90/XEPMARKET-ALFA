@@ -3,9 +3,9 @@
  * XepMarket2 functions and definitions
  */
 
-// Include TGM Plugin Activation
-require_once get_template_directory() . '/inc/plugin-config.php';
+// Include TGM Plugin Activation (github-plugins-sync first so TGMPA can use GitHub zip URL)
 require_once get_template_directory() . '/inc/github-plugins-sync.php';
+require_once get_template_directory() . '/inc/plugin-config.php';
 require_once get_template_directory() . '/inc/demo-importer.php';
 require_once get_template_directory() . '/inc/seo-config.php';
 require_once get_template_directory() . '/inc/ali-sync/helper.php';
@@ -16,8 +16,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 1.8.6 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.8.6');
+// Define Theme Version: 1.8.7 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '1.8.7');
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
