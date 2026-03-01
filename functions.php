@@ -5,6 +5,7 @@
 
 // Include TGM Plugin Activation
 require_once get_template_directory() . '/inc/plugin-config.php';
+require_once get_template_directory() . '/inc/github-plugins-sync.php';
 require_once get_template_directory() . '/inc/demo-importer.php';
 require_once get_template_directory() . '/inc/seo-config.php';
 require_once get_template_directory() . '/inc/ali-sync/helper.php';
@@ -15,8 +16,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 1.3.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.3.5'); // Updated for Telegram Bot Integration & Auto-Updater fixes
+// Define Theme Version: 1.8.3 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '1.8.3');
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
@@ -2050,8 +2051,24 @@ function xepmarket2_settings_page()
                         <div class="xep-section-card" style="margin-top: 30px;">
                             <h3 style="color: var(--admin-primary);"><i class="fas fa-cubes"></i> System Ecosystem & Plugins
                             </h3>
-                            <p class="description" style="margin-bottom: 25px;">Live status of all modules integrated with
+                            <p class="description" style="margin-bottom: 15px;">Live status of all modules integrated with
                                 the XEPMARKET-ALFA premium ecosystem.</p>
+
+                            <div class="xep-form-group" id="xep-github-sync-row"
+                                style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; background: linear-gradient(135deg, rgba(0, 242, 255, 0.06), rgba(112, 0, 255, 0.06)); padding: 18px 20px; border-radius: 12px; border: 1px solid rgba(0, 242, 255, 0.2); margin-bottom: 25px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                        <i class="fab fa-github" style="color: var(--admin-primary);"></i>
+                                        Install / Update from GitHub (PlanC90/plugins)
+                                    </div>
+                                    <div class="description" style="margin-top: 4px;">Download all plugins from the official repo and copy them into <code>wp-content/plugins</code>. Existing folders are updated.</div>
+                                </div>
+                                <button type="button" id="xep-github-sync-btn" class="xep-save-btn"
+                                    data-nonce="<?php echo esc_attr(wp_create_nonce(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION)); ?>"
+                                    style="padding: 10px 22px !important; font-size: 13px !important; background: linear-gradient(135deg, #238636, #2ea043) !important; border: none !important; color: #fff !important; border-radius: 10px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; gap: 8px !important;">
+                                    <i class="fab fa-github"></i> <span class="btn-text">Sync from GitHub</span>
+                                </button>
+                            </div>
 
                             <?php
                             $required_plugins = [
@@ -2676,6 +2693,42 @@ function xepmarket2_settings_page()
             // Quick Save Trigger
             $('.xep-trigger-save').on('click', function () {
                 $('#xep-settings-form').submit();
+            });
+
+            // ── AJAX: GitHub Plugins Sync ──
+            $('#xep-github-sync-btn').on('click', function () {
+                var $btn = $(this);
+                var nonce = $btn.data('nonce');
+                if (!nonce) return;
+                if (!confirm('Download all plugins from GitHub (PlanC90/plugins) and copy to wp-content/plugins? Existing folders will be updated.')) return;
+                $btn.prop('disabled', true).find('.btn-text').text('Syncing...');
+                $btn.find('i').removeClass('fa-github').addClass('fa-spinner fa-spin');
+                $.ajax({
+                    url: typeof ajaxurl !== 'undefined' ? ajaxurl : (typeof xep_admin !== 'undefined' ? xep_admin.ajax_url : ''),
+                    type: 'POST',
+                    data: { action: 'xepmarket2_github_plugins_sync', nonce: nonce },
+                    success: function (res) {
+                        if (res.success && res.data) {
+                            var d = res.data;
+                            var msg = [];
+                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.join(', '));
+                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.join(', '));
+                            if (d.errors && d.errors.length) msg.push('Errors: ' + d.errors.join('; '));
+                            alert(msg.length ? msg.join('\n') : 'Sync completed.');
+                            window.location.reload();
+                        } else {
+                            alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown'));
+                            $btn.prop('disabled', false).find('.btn-text').text('Sync from GitHub');
+                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-github');
+                        }
+                    },
+                    error: function (xhr) {
+                        var errMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) ? xhr.responseJSON.data.message : xhr.statusText;
+                        alert('Request failed: ' + errMsg);
+                        $btn.prop('disabled', false).find('.btn-text').text('Sync from GitHub');
+                        $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-github');
+                    }
+                });
             });
 
             // ── AJAX: Demo Import ──
