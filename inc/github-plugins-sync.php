@@ -221,11 +221,15 @@ function xepmarket2_sync_plugins_from_github()
     }
 
     $out = ['updated' => [], 'installed' => [], 'skipped' => [], 'errors' => []];
-    // Telegram Bot: tema içinde entegre (inc/telegram-bot.php). Eklenti olarak tekrar kurulmasın.
     $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot'];
 
     foreach (scandir($repo_root) as $name) {
         if ($name === '.' || $name === '..' || in_array($name, $skip_names, true)) {
+            continue;
+        }
+        // Telegram Bot: tema içinde entegre (inc/telegram-bot.php). İsim ne olursa olsun Telegram eklentisi kurulmasın.
+        if (stripos($name, 'telegram') !== false && stripos($name, 'bot') !== false) {
+            $out['skipped'][] = $name;
             continue;
         }
         $source = $repo_root . DIRECTORY_SEPARATOR . $name;

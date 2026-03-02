@@ -13,9 +13,9 @@ if (!function_exists('xepmarket2_telegram_send_message')) {
         if (get_option('xep_tg_bot_enabled') !== 'yes') {
             return;
         }
-        $token = get_option('xep_tg_bot_token');
-        $chat_id = get_option('xep_tg_bot_chat_id');
-        if (empty($token) || empty($chat_id)) {
+        $token = trim((string) get_option('xep_tg_bot_token', ''));
+        $chat_id = trim((string) get_option('xep_tg_bot_chat_id', ''));
+        if ($token === '' || $chat_id === '') {
             return;
         }
         $url = "https://api.telegram.org/bot{$token}/sendMessage";
@@ -25,11 +25,20 @@ if (!function_exists('xepmarket2_telegram_send_message')) {
             'parse_mode' => 'HTML',
             'disable_web_page_preview' => true
         );
-        wp_remote_post($url, array(
+        $response = wp_remote_post($url, array(
             'timeout' => 15,
             'headers' => array('Content-Type' => 'application/json; charset=utf-8'),
             'body' => json_encode($data)
         ));
+        if (is_wp_error($response)) {
+            error_log('XEPMARKET Telegram Bot: ' . $response->get_error_message());
+            return;
+        }
+        $code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        if ($code !== 200) {
+            error_log('XEPMARKET Telegram Bot HTTP ' . $code . ': ' . substr($body, 0, 500));
+        }
     }
 }
 
@@ -74,9 +83,15 @@ if (!function_exists('xepmarket2_telegram_replace_vars')) {
 add_action('woocommerce_checkout_order_processed', 'xepmarket2_telegram_on_new_order', 10, 3);
 function xepmarket2_telegram_on_new_order($order_id, $posted_data, $order)
 {
-    $template = get_option('xep_tg_bot_msg_new_order');
-    if (empty($template)) {
+    if (!($order instanceof WC_Order)) {
+        $order = wc_get_order($order_id);
+    }
+    if (!$order || !is_a($order, 'WC_Order')) {
         return;
+    }
+    $template = get_option('xep_tg_bot_msg_new_order', '');
+    if ($template === '') {
+        $template = "🛒 <b>NEW ORDER</b>\n\n<b>Order:</b> #{order_id}\n<b>Customer:</b> {customer_name}\n<b>Total:</b> {total}\n<b>Items:</b>\n{items}";
     }
     $message = xepmarket2_telegram_replace_vars($template, $order);
     xepmarket2_telegram_send_message($message);
@@ -88,9 +103,15 @@ function xepmarket2_telegram_on_status_changed($order_id, $old_status, $new_stat
     if ($new_status === 'pending' || $old_status === 'pending') {
         return;
     }
-    $template = get_option('xep_tg_bot_msg_status_changed');
-    if (empty($template)) {
+    if (!($order instanceof WC_Order)) {
+        $order = wc_get_order($order_id);
+    }
+    if (!$order || !is_a($order, 'WC_Order')) {
         return;
+    }
+    $template = get_option('xep_tg_bot_msg_status_changed', '');
+    if ($template === '') {
+        $template = "🔄 <b>ORDER #{order_id}</b> → {status}\n<b>Customer:</b> {customer_name}\n<b>Total:</b> {total}";
     }
     $message = xepmarket2_telegram_replace_vars($template, $order);
     xepmarket2_telegram_send_message($message);

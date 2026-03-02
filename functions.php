@@ -1438,8 +1438,12 @@ function xepmarket2_settings_init()
 
     // Telegram Bot (theme-integrated; same options as standalone plugin)
     register_setting('xepmarket2_settings_group', 'xep_tg_bot_enabled');
-    register_setting('xepmarket2_settings_group', 'xep_tg_bot_token');
-    register_setting('xepmarket2_settings_group', 'xep_tg_bot_chat_id');
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_token', array(
+        'sanitize_callback' => function ($v) { return is_string($v) ? trim($v) : ''; }
+    ));
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_chat_id', array(
+        'sanitize_callback' => function ($v) { return is_string($v) ? trim($v) : ''; }
+    ));
     register_setting('xepmarket2_settings_group', 'xep_tg_bot_msg_new_order');
     register_setting('xepmarket2_settings_group', 'xep_tg_bot_msg_status_changed');
     // Affiliate (theme-integrated; same options as standalone plugin)
@@ -3014,6 +3018,7 @@ function xepmarket2_settings_page()
                                     <p class="description" style="margin: 0;">Turn notifications on or off.</p>
                                 </div>
                                 <label style="display: inline-flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="hidden" name="xep_tg_bot_enabled" value="no">
                                     <input type="checkbox" name="xep_tg_bot_enabled" value="yes" <?php checked(get_option('xep_tg_bot_enabled'), 'yes'); ?>>
                                     <span>Active</span>
                                 </label>
