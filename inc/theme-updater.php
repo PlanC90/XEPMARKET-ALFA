@@ -4,19 +4,20 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Tema güncellendikten sonra OmniXEP ve Telegram Bot eklentilerinin sürümlerini
- * aktif tema sürümüyle eşitler (Modüller sekmesinde "güncel" görünsün).
+ * Tema güncellendikten sonra OmniXEP eklentisinin sürümünü tema sürümüyle eşitler.
+ * Telegram Bot artık temada entegre (ayarlar: Tema Ayarları → Telegram Bot).
  */
 function xepmarket2_sync_plugin_versions_to_theme()
 {
-    $theme = wp_get_theme(get_template());
-    $version = $theme ? $theme->get('Version') : '';
-    if (empty($version)) {
-        return;
+    // Always sync to ACTIVE theme version (fallback to constant)
+    $theme = wp_get_theme();
+    $version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
+    if (empty($version) && defined('XEPMARKET_ALFA_VERSION')) {
+        $version = XEPMARKET_ALFA_VERSION;
     }
+    if (empty($version)) return;
 
     $plugins_dir = WP_PLUGIN_DIR;
-    $version_esc = preg_quote($version, '/');
 
     // OmniXEP: ana dosya (Version header + tüm plugin_version)
     $omni_main = $plugins_dir . '/omnixep-woocommerce/omnixep-woocommerce.php';
@@ -38,23 +39,6 @@ function xepmarket2_sync_plugin_versions_to_theme()
             @file_put_contents($omni_class, $content);
         }
     }
-
-    // Telegram Bot: olası ana dosya yolları
-    $tg_paths = array(
-        $plugins_dir . '/xepmarket-telegram-bot/xepmarket-telegram-bot/xepmarket-telegram-bot.php',
-        $plugins_dir . '/xepmarket-telegram-bot/xepmarket-telegram-bot.php',
-        $plugins_dir . '/xepmarket-telegram-bot-2/xepmarket-telegram-bot.php',
-    );
-    foreach ($tg_paths as $path) {
-        if (is_readable($path) && is_writable($path)) {
-            $content = file_get_contents($path);
-            if ($content !== false) {
-                $content = preg_replace('/\* Version: \S+/', '* Version: ' . $version, $content);
-                @file_put_contents($path, $content);
-            }
-            break;
-        }
-    }
 }
 
 class XepMarket_Theme_Updater
@@ -66,7 +50,9 @@ class XepMarket_Theme_Updater
 
     public function __construct()
     {
-        $this->theme_slug = 'XEPMARKET-ALFA';
+        // Use active theme stylesheet slug (matches update_themes transient keys)
+        $active_theme = wp_get_theme();
+        $this->theme_slug = ($active_theme && $active_theme->exists()) ? $active_theme->get_stylesheet() : 'XEPMARKET-ALFA';
         $this->repo_user = 'PlanC90';
         $this->repo_name = 'XEPMARKET-ALFA';
 
@@ -83,7 +69,13 @@ class XepMarket_Theme_Updater
     public function updater_page_html()
     {
         $theme = wp_get_theme($this->theme_slug);
-        $current_version = $theme->get('Version');
+        $current_version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
+        if (empty($current_version) && defined('XEPMARKET_ALFA_VERSION')) {
+            $current_version = XEPMARKET_ALFA_VERSION;
+        }
+        if (empty($current_version)) {
+            $current_version = 'Unknown';
+        }
 
         $release = $this->get_latest_release(true); // force check for the page display
 
@@ -404,7 +396,10 @@ class XepMarket_Theme_Updater
         }
 
         $theme = wp_get_theme($this->theme_slug);
-        $current_version = $theme->get('Version');
+        $current_version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
+        if (empty($current_version) && defined('XEPMARKET_ALFA_VERSION')) {
+            $current_version = XEPMARKET_ALFA_VERSION;
+        }
 
         $release = $this->get_latest_release();
 

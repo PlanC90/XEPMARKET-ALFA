@@ -20,7 +20,7 @@ add_action('tgmpa_register', 'xepmarket2_register_required_plugins');
 function xepmarket2_get_plugin_expected_version($slug)
 {
     $theme_version = wp_get_theme(get_template())->get('Version');
-    $use_theme_version = array('omnixep-woocommerce', 'xepmarket-telegram-bot');
+    $use_theme_version = array('omnixep-woocommerce');
     if (in_array($slug, $use_theme_version, true) && $theme_version) {
         return $theme_version;
     }
@@ -47,19 +47,7 @@ function xepmarket2_register_required_plugins()
             'force_activation' => false,
             'force_deactivation' => false,
         ),
-        array(
-            'name' => 'OmniXEP Affiliate',
-            'slug' => 'omnixep-affiliate',
-            'source' => 'omnixep-affiliate.zip',
-            'required' => false,
-        ),
-        array(
-            'name' => 'XEP Market Telegram Bot',
-            'slug' => 'xepmarket-telegram-bot',
-            'source' => xepmarket2_get_github_plugin_zip_url('xepmarket-telegram-bot') ?: $plugin_path . 'xepmarket-telegram-bot.zip',
-            'required' => false,
-            'version' => xepmarket2_get_plugin_expected_version('xepmarket-telegram-bot'),
-        ),
+        // OmniXEP Affiliate: not in TGMPA – built into theme (Settings → Affiliate tab). No plugin needed.
 
         // ── Bundled Modules (Recommended) ──
         array(
@@ -84,14 +72,6 @@ function xepmarket2_register_required_plugins()
             'name' => 'Orders Tracking',
             'slug' => 'woo-orders-tracking',
             'source' => 'woo-orders-tracking.zip',
-            'required' => false,
-        ),
-
-
-        array(
-            'name' => 'WP Mail SMTP',
-            'slug' => 'wp-mail-smtp',
-            'source' => 'wp-mail-smtp.zip',
             'required' => false,
         ),
     );

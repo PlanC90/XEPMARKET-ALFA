@@ -15,6 +15,9 @@
                         <img src="<?php echo esc_url($f_logo_img); ?>" alt="<?php bloginfo('name'); ?>"
                             style="max-height: 60px; width: auto; margin: 0 auto; display: block;">
                     <?php else: ?>
+                        <?php if ($f_logo_type === 'text_image' && $f_logo_img): ?>
+                            <img class="logo-icon" src="<?php echo esc_url($f_logo_img); ?>" alt="<?php bloginfo('name'); ?>">
+                        <?php endif; ?>
                         <?php echo esc_html($f_logo_text1); ?><span
                             class="logo-accent"><?php echo esc_html($f_logo_text2); ?></span>
                     <?php endif; ?>

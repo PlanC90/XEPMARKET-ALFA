@@ -67,6 +67,9 @@
                                 <img src="<?php echo esc_url($h_logo_img); ?>" alt="<?php bloginfo('name'); ?>"
                                     style="max-height: 40px; width: auto; display: block;">
                             <?php else: ?>
+                                <?php if ($h_logo_type === 'text_image' && $h_logo_img): ?>
+                                    <img class="logo-icon" src="<?php echo esc_url($h_logo_img); ?>" alt="<?php bloginfo('name'); ?>">
+                                <?php endif; ?>
                                 <?php echo esc_html($h_logo_text1); ?><span class="logo-accent">
                                     <?php echo esc_html($h_logo_text2); ?>
                                 </span>
@@ -77,12 +80,18 @@
 
                 <nav id="site-navigation" class="main-navigation">
                     <?php
-                    wp_nav_menu(array(
-                        'theme_location' => 'primary',
+                    $web_menu_id = xepmarket2_get_option_fast('xepmarket2_menu_web', '');
+                    $nav_args = array(
                         'menu_id' => 'primary-menu',
                         'container' => false,
                         'fallback_cb' => 'xepmarket2_menu_fallback',
-                    ));
+                    );
+                    if (!empty($web_menu_id) && is_nav_menu($web_menu_id)) {
+                        $nav_args['menu'] = (int) $web_menu_id;
+                    } else {
+                        $nav_args['theme_location'] = 'primary';
+                    }
+                    wp_nav_menu($nav_args);
                     ?>
                 </nav>
 
@@ -138,33 +147,77 @@
         </header>
 
         <!-- Mobile App-Like Bottom Navigation (ONLY visible on mobile via CSS) -->
-        <?php if (class_exists('WooCommerce')): ?>
+        <?php if (class_exists('WooCommerce')):
+            $show_home   = (string) get_option('xepmarket2_mobile_nav_show_home', '1') === '1';
+            $show_shop   = (string) get_option('xepmarket2_mobile_nav_show_shop', '1') === '1';
+            $show_cart   = (string) get_option('xepmarket2_mobile_nav_show_cart', '1') === '1';
+            $show_account = (string) get_option('xepmarket2_mobile_nav_show_account', '1') === '1';
+            $icon_home   = sanitize_text_field(get_option('xepmarket2_mobile_nav_icon_home', ''));
+            $icon_shop   = sanitize_text_field(get_option('xepmarket2_mobile_nav_icon_shop', ''));
+            $icon_cart   = sanitize_text_field(get_option('xepmarket2_mobile_nav_icon_cart', ''));
+            $icon_account = sanitize_text_field(get_option('xepmarket2_mobile_nav_icon_account', ''));
+            if (empty($icon_home))   $icon_home   = 'dashicons dashicons-admin-home';
+            if (empty($icon_shop))   $icon_shop   = 'dashicons dashicons-store';
+            if (empty($icon_cart))   $icon_cart   = 'dashicons dashicons-cart';
+            if (empty($icon_account)) $icon_account = 'dashicons dashicons-admin-users';
+            $custom_nav = get_option('xepmarket2_mobile_nav_custom_items', array());
+            $custom_nav = is_array($custom_nav) ? array_slice($custom_nav, 0, 5) : array();
+            $nav_order = get_option('xepmarket2_mobile_nav_order', array('home', 'shop', 'cart', 'account', 'custom_0'));
+            if (!is_array($nav_order) || count($nav_order) < 5) $nav_order = array('home', 'shop', 'cart', 'account', 'custom_0');
+            $has_any_custom = false;
+            foreach ($custom_nav as $c) {
+                $s = isset($c['show']) ? (bool) $c['show'] : false;
+                $u = isset($c['url']) ? trim($c['url']) : '';
+                if ($s && $u !== '') { $has_any_custom = true; break; }
+            }
+            if ($show_home || $show_shop || $show_cart || $show_account || $has_any_custom):
+            ?>
             <div class="mobile-app-nav">
-                <a href="<?php echo esc_url(home_url('/')); ?>"
-                    class="app-nav-item <?php echo is_front_page() ? 'active' : ''; ?>">
-                    <i class="dashicons dashicons-admin-home"></i>
-                    <span>Home</span>
-                </a>
-                <a href="<?php echo esc_url(wc_get_page_permalink('shop')); ?>"
-                    class="app-nav-item <?php echo is_post_type_archive('product') || is_tax('product_cat') ? 'active' : ''; ?>">
-                    <i class="dashicons dashicons-store"></i>
-                    <span>Shop</span>
-                </a>
-                <a href="<?php echo esc_url(wc_get_cart_url()); ?>"
-                    class="app-nav-item <?php echo is_cart() ? 'active' : ''; ?>">
+                <?php
+                $nav_items = array();
+                $item_map = array(
+                    'home'    => $show_home ? array('url' => home_url('/'), 'label' => 'Home', 'icon' => $icon_home, 'active' => is_front_page(), 'cart' => false) : null,
+                    'shop'    => $show_shop ? array('url' => wc_get_page_permalink('shop'), 'label' => 'Shop', 'icon' => $icon_shop, 'active' => is_post_type_archive('product') || is_tax('product_cat'), 'cart' => false) : null,
+                    'cart'    => $show_cart ? array('url' => wc_get_cart_url(), 'label' => 'Cart', 'icon' => $icon_cart, 'active' => is_cart(), 'cart' => true) : null,
+                    'account' => $show_account ? array('url' => wc_get_page_permalink('myaccount'), 'label' => 'Account', 'icon' => $icon_account, 'active' => is_account_page(), 'cart' => false) : null,
+                );
+                for ($i = 0; $i < 5; $i++) {
+                    $id = isset($nav_order[$i]) ? $nav_order[$i] : '';
+                    if ($id === 'home' || $id === 'shop' || $id === 'cart' || $id === 'account') {
+                        if (!empty($item_map[$id])) $nav_items[] = $item_map[$id];
+                    } elseif (preg_match('/^custom_(\d+)$/', $id, $m)) {
+                        $ci = (int) $m[1];
+                        if (isset($custom_nav[$ci])) {
+                            $c = $custom_nav[$ci];
+                            $s = isset($c['show']) ? (bool) $c['show'] : false;
+                            $u = isset($c['url']) ? trim($c['url']) : '';
+                            if ($s && $u !== '') {
+                                $nav_items[] = array('url' => $u, 'label' => !empty($c['label']) ? $c['label'] : __('Link', 'xepmarket2'), 'icon' => !empty($c['icon']) ? $c['icon'] : 'dashicons dashicons-admin-links', 'active' => false, 'cart' => false);
+                            }
+                        }
+                    }
+                }
+                $nav_items = array_slice($nav_items, 0, 5);
+                foreach ($nav_items as $item):
+                    if ($item['cart']):
+                ?>
+                <a href="<?php echo esc_url($item['url']); ?>" class="app-nav-item <?php echo $item['active'] ? 'active' : ''; ?>">
                     <div class="app-nav-cart-icon">
-                        <i class="dashicons dashicons-cart"></i>
+                        <i class="<?php echo esc_attr($item['icon']); ?>"></i>
                         <span class="app-cart-count"><?php echo WC()->cart->get_cart_contents_count(); ?></span>
                     </div>
-                    <span>Cart</span>
+                    <span><?php echo esc_html($item['label']); ?></span>
                 </a>
-                <a href="<?php echo esc_url(wc_get_page_permalink('myaccount')); ?>"
-                    class="app-nav-item <?php echo is_account_page() ? 'active' : ''; ?>">
-                    <i class="dashicons dashicons-admin-users"></i>
-                    <span>Account</span>
+                <?php else: ?>
+                <a href="<?php echo esc_url($item['url']); ?>" class="app-nav-item <?php echo $item['active'] ? 'active' : ''; ?>">
+                    <i class="<?php echo esc_attr($item['icon']); ?>"></i>
+                    <span><?php echo esc_html($item['label']); ?></span>
                 </a>
+                <?php endif; endforeach; ?>
             </div>
-        <?php endif; ?>
+            <?php
+            endif;
+        endif; ?>
 
         <!-- Mobile Navigation Drawer (hidden by default) -->
         <div class="mobile-navigation">
@@ -185,12 +238,18 @@
             <div class="mobile-menu-content">
 
                 <?php
-                wp_nav_menu(array(
-                    'theme_location' => 'primary',
+                $mobile_menu_id = xepmarket2_get_option_fast('xepmarket2_menu_mobile', '');
+                $mobile_nav_args = array(
                     'container' => false,
                     'menu_class' => 'mobile-menu-list',
                     'fallback_cb' => false,
-                ));
+                );
+                if (!empty($mobile_menu_id) && is_nav_menu($mobile_menu_id)) {
+                    $mobile_nav_args['menu'] = (int) $mobile_menu_id;
+                } else {
+                    $mobile_nav_args['theme_location'] = 'primary';
+                }
+                wp_nav_menu($mobile_nav_args);
                 ?>
             </div>
         </div>

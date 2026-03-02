@@ -10,7 +10,7 @@ if (!defined('ABSPATH')) {
 
 define('XEPMARKET2_GITHUB_PLUGINS_REPO', 'https://github.com/PlanC90/plugins/archive/refs/heads/main.zip');
 define('XEPMARKET2_GITHUB_SYNC_NONCE_ACTION', 'xepmarket2_github_plugins_sync');
-define('XEPMARKET2_PLUGIN_ZIP_SLUGS', ['omnixep-woocommerce', 'xepmarket-telegram-bot']);
+define('XEPMARKET2_PLUGIN_ZIP_SLUGS', ['omnixep-woocommerce']);
 
 /**
  * TGMPA / Upgrader: single-plugin zip from GitHub (WordPress expects one root folder).

@@ -10,8 +10,9 @@ if (!defined('ABSPATH'))
 
 /**
  * Main function to import demo data
+ * @param bool $apply_theme_defaults If false, only create pages/menus; theme options stay as-is (current state).
  */
-function xepmarket2_setup_demo_data()
+function xepmarket2_setup_demo_data($apply_theme_defaults = true)
 {
     // ════════════════════════════════════════════════════
     // 1. CREATE ESSENTIAL PAGES
@@ -150,9 +151,20 @@ function xepmarket2_setup_demo_data()
         set_theme_mod('nav_menu_locations', $locations);
     }
 
+    $primary_menu_id = $menu_exists ? $menu_exists->term_id : (isset($menu_id) ? $menu_id : 0);
+
     // ════════════════════════════════════════════════════
-    // 4. DEFAULT THEME OPTIONS (Full Current State)
+    // 4. DEFAULT THEME OPTIONS (skip if preserving current state)
     // ════════════════════════════════════════════════════
+    if (!$apply_theme_defaults) {
+        return true;
+    }
+
+    if ($primary_menu_id > 0) {
+        update_option('xepmarket2_menu_web', $primary_menu_id);
+        update_option('xepmarket2_menu_mobile', $primary_menu_id);
+    }
+
     $template_uri = get_template_directory_uri();
 
     $defaults = array(
@@ -282,27 +294,61 @@ function xepmarket2_setup_demo_data()
 }
 
 /**
- * Factory Reset Function
+ * Factory Reset Function — restores to last saved "current state" (no wipe to demo).
  */
 function xepmarket2_factory_reset()
 {
+    return xepmarket2_restore_saved_state();
+}
+
+/**
+ * Save current theme state (options + theme mods) for "Reset to current state".
+ */
+function xepmarket2_save_current_state()
+{
     global $wpdb;
-
-    // 1. Delete ALL theme options
-    $wpdb->query($wpdb->prepare("DELETE FROM $wpdb->options WHERE option_name LIKE %s", 'xepmarket2_%'));
-
-    // 2. Delete Demo Menus
-    $menu_name = 'Main Menu';
-    $menu_obj = wp_get_nav_menu_object($menu_name);
-    if ($menu_obj) {
-        wp_delete_nav_menu($menu_obj->term_id);
+    $options = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+        'xepmarket2_%'
+    ), ARRAY_A);
+    $state_options = array();
+    foreach ($options as $row) {
+        $state_options[$row['option_name']] = maybe_unserialize($row['option_value']);
     }
+    $theme_mods = get_theme_mods();
+    if (false === $theme_mods) {
+        $theme_mods = array();
+    }
+    $state = array(
+        'options' => $state_options,
+        'theme_mods' => $theme_mods,
+        'saved_at' => current_time('mysql'),
+    );
+    update_option('xepmarket2_saved_state', $state, false);
+    return true;
+}
 
-    // 3. Clear theme mods (menu locations etc)
-    remove_theme_mods();
-
-    // 4. Re-apply all defaults from scratch
-    return xepmarket2_setup_demo_data();
+/**
+ * Restore theme to last saved state. Returns false if no saved state.
+ */
+function xepmarket2_restore_saved_state()
+{
+    global $wpdb;
+    $state = get_option('xepmarket2_saved_state');
+    if (empty($state) || !is_array($state) || empty($state['options'])) {
+        return false;
+    }
+    $wpdb->query($wpdb->prepare("DELETE FROM $wpdb->options WHERE option_name LIKE %s", 'xepmarket2_%'));
+    foreach ($state['options'] as $name => $value) {
+        update_option($name, $value, false);
+    }
+    if (!empty($state['theme_mods']) && is_array($state['theme_mods'])) {
+        remove_theme_mods();
+        foreach ($state['theme_mods'] as $key => $val) {
+            set_theme_mod($key, $val);
+        }
+    }
+    return true;
 }
 
 /**
@@ -319,15 +365,31 @@ function xepmarket2_ajax_factory_reset()
     $result = xepmarket2_factory_reset();
 
     if ($result) {
-        wp_send_json_success('Theme successfully reset to factory defaults!');
+        wp_send_json_success(__('Theme restored to saved state.', 'xepmarket2'));
     } else {
-        wp_send_json_error('Reset failed.');
+        wp_send_json_error(__('No saved state found. Click "Save current state" first.', 'xepmarket2'));
     }
 }
 add_action('wp_ajax_xep_factory_reset', 'xepmarket2_ajax_factory_reset');
 
 /**
+ * Ajax: Save current theme state for later restore
+ */
+function xepmarket2_ajax_save_current_state()
+{
+    check_ajax_referer('xep_admin_nonce', 'nonce');
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Unauthorized');
+    }
+    xepmarket2_save_current_state();
+    wp_send_json_success(__('Current state saved. Use "Reset" to restore to this state.', 'xepmarket2'));
+}
+add_action('wp_ajax_xep_save_current_state', 'xepmarket2_ajax_save_current_state');
+
+/**
  * Ajax Handler for Demo Import
+ * On first install (no Main Menu / no home page): full demo setup like live preview.
+ * On later runs: only add missing pages and menu, do not change theme settings.
  */
 function xepmarket2_ajax_import_demo()
 {
@@ -337,10 +399,22 @@ function xepmarket2_ajax_import_demo()
         wp_send_json_error('Unauthorized');
     }
 
-    $result = xepmarket2_setup_demo_data();
+    $is_first_install = false;
+    $menu_exists = wp_get_nav_menu_object('Main Menu');
+    $home_page = get_page_by_path('home');
+    if (!$menu_exists && !$home_page) {
+        $is_first_install = true;
+    }
+
+    $apply_theme_defaults = $is_first_install;
+    $result = xepmarket2_setup_demo_data($apply_theme_defaults);
 
     if ($result) {
-        wp_send_json_success('Demo data successfully imported!');
+        if ($is_first_install) {
+            wp_send_json_success(__('Full demo setup complete. Site configured like the live preview.', 'xepmarket2'));
+        } else {
+            wp_send_json_success(__('Pages and menu updated. Theme settings unchanged.', 'xepmarket2'));
+        }
     } else {
         wp_send_json_error('Import failed.');
     }

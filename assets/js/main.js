@@ -370,7 +370,7 @@
             }
         }
 
-        // 10. SALE CAROUSEL LOGIC — sonsuz döngü; mobilde tek ürün
+        // 10. SALE CAROUSEL LOGIC — sonsuz döngü; mobilde tek ürün ortalanmış
         var $saleCarousel = $('.sale-carousel-wrapper ul.products');
         if ($saleCarousel.length) {
             var el = $saleCarousel[0];
@@ -385,24 +385,22 @@
             var programmaticScroll = false;
             $('.sale-next').on('click', function (e) {
                 e.preventDefault();
-                if (!hasScroll()) return;
                 programmaticScroll = true;
                 var itemWidth = getItemWidth();
                 if (isAtEnd()) {
-                    el.scrollLeft = 0;
+                    el.scrollTo({ left: 0, behavior: 'smooth' });
                 } else {
-                    el.scrollBy({ left: itemWidth, behavior: 'smooth' });
+                    if (hasScroll()) el.scrollBy({ left: itemWidth, behavior: 'smooth' });
                 }
             });
             $('.sale-prev').on('click', function (e) {
                 e.preventDefault();
-                if (!hasScroll()) return;
                 programmaticScroll = true;
                 var itemWidth = getItemWidth();
                 if (isAtStart()) {
-                    el.scrollLeft = el.scrollWidth - el.clientWidth;
+                    el.scrollTo({ left: el.scrollWidth - el.clientWidth, behavior: 'smooth' });
                 } else {
-                    el.scrollBy({ left: -itemWidth, behavior: 'smooth' });
+                    if (hasScroll()) el.scrollBy({ left: -itemWidth, behavior: 'smooth' });
                 }
             });
 

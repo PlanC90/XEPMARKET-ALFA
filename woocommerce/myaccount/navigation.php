@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) {
 $nav_icons = array(
     'dashboard' => 'fas fa-th-large',
     'orders' => 'fas fa-shopping-bag',
+    'affiliate' => 'fas fa-handshake',
     'downloads' => 'fas fa-download',
     'edit-address' => 'fas fa-map-marker-alt',
     'edit-account' => 'fas fa-user-edit',

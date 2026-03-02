@@ -20,3 +20,4 @@ How to create the zip correctly:
 3. Put omnixep-woocommerce.zip in this inc/plugins/ directory.
 
 Same for xepmarket-telegram-bot.zip: root must be one folder xepmarket-telegram-bot/
+(Telegram Bot is built into the theme – no need to bundle or install it as a plugin.)
