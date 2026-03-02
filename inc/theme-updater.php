@@ -224,7 +224,11 @@ class XepMarket_Theme_Updater
                                         $progressBar.css('width', '100%').css('background', '#32d74b');
                                         $status.text('SUCCESS! REFRESHING...').css('color', '#32d74b');
                                         $btn.html('<i class="fas fa-check"></i> UPDATED').css('background', '#2ecc71');
-                                        setTimeout(() => { window.location.reload(); }, 1500);
+                                        var reloadUrl = window.location.href.replace(/#.*$/, '');
+                                        if (reloadUrl.indexOf('?') === -1) reloadUrl += '?';
+                                        else reloadUrl += '&';
+                                        reloadUrl += 'xep_updated=' + (response.data && response.data.version ? response.data.version : Date.now());
+                                        setTimeout(function () { window.location.href = reloadUrl + '#tab-updater'; }, 1500);
                                     } else {
                                         $progressBar.css('width', '100%').css('background', '#ff453a');
                                         $status.text('ERROR: ' + (response.data || 'Unknown error')).css('color', '#ff453a');
@@ -302,12 +306,40 @@ class XepMarket_Theme_Updater
                 wp_send_json_error('System rejected the update. This usually happens if the update package is missing or folder permissions (FS_METHOD) are restricted. Try updating via Appearance > Themes.');
             }
 
-            error_log("XEP Update Success!");
+            $release = $this->get_latest_release(false);
+            $expected_version = ($release && isset($release->tag_name)) ? ltrim($release->tag_name, 'v') : '';
             xepmarket2_sync_plugin_versions_to_theme();
             wp_clean_themes_cache();
             delete_site_transient('update_themes');
             delete_transient('xepmarket2_github_release');
-            wp_send_json_success('Theme updated successfully to latest version.');
+
+            // Verify version on disk so cache is not showing old version
+            $theme = wp_get_theme($this->theme_slug);
+            $theme_root = $theme && $theme->exists() ? $theme->get_stylesheet_directory() : '';
+            $style_file = $theme_root ? $theme_root . '/style.css' : '';
+            $version_on_disk = '';
+            if ($style_file && is_readable($style_file)) {
+                $content = file_get_contents($style_file, false, null, 0, 2048);
+                if ($content && preg_match('/^\s*\*\s*Version:\s*(\S+)/m', $content, $m)) {
+                    $version_on_disk = trim($m[1]);
+                }
+            }
+            if ($expected_version && $version_on_disk !== $expected_version) {
+                error_log("XEP Update: Version on disk ({$version_on_disk}) does not match expected ({$expected_version}). Clearing caches.");
+                wp_clean_themes_cache();
+                if (function_exists('wp_cache_flush')) {
+                    wp_cache_flush();
+                }
+                wp_send_json_error(
+                    'Güncelleme tamamlandı ama tema dosyaları hâlâ eski sürüm (' . $version_on_disk . '). Sunucu izinleri veya tema klasör yapısı farklı olabilir. Lütfen sayfanın altındaki "Manual Installation (No-JS Fallback)" linki ile güncelleyin veya FTP ile tema klasörünü GitHub\'dan indirip yükleyin.'
+                );
+            }
+
+            error_log("XEP Update Success! Version on disk: " . ($version_on_disk ?: 'unknown'));
+            wp_send_json_success(array(
+                'message' => 'Theme updated successfully to latest version.',
+                'version' => $version_on_disk ?: $expected_version
+            ));
         } catch (Exception $e) {
             error_log("XEP Update Exception: " . $e->getMessage());
             wp_send_json_error('Update failed: ' . $e->getMessage());
@@ -421,14 +453,21 @@ class XepMarket_Theme_Updater
         global $wp_filesystem;
 
         // Check if the update is for our theme
-        if (isset($hook_extra['action']) && $hook_extra['action'] === 'update' && isset($hook_extra['theme']) && $hook_extra['theme'] === $this->theme_slug) {
-            $corrected_source = trailingslashit($remote_source) . $this->theme_slug . '/';
-
-            if ($wp_filesystem->move($source, $corrected_source, true)) {
-                return $corrected_source;
-            }
+        if (!isset($hook_extra['action']) || $hook_extra['action'] !== 'update' || !isset($hook_extra['theme']) || $hook_extra['theme'] !== $this->theme_slug) {
+            return $source;
         }
-        return $source;
+
+        $corrected_source = trailingslashit($remote_source) . $this->theme_slug . '/';
+        if (!$wp_filesystem->move($source, $corrected_source, true)) {
+            return $source;
+        }
+
+        // If GitHub zip has theme in a subfolder (e.g. repo root = XEPMARKET-ALFA/ with style.css inside), use that so the right files are installed
+        $inner = trailingslashit($corrected_source) . $this->theme_slug . '/';
+        if ($wp_filesystem->exists($inner . 'style.css')) {
+            return $inner;
+        }
+        return $corrected_source;
     }
 }
 global $xepmarket_updater;
