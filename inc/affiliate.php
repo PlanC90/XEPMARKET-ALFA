@@ -24,6 +24,8 @@ add_action('init', function () {
     if (is_admin() || !isset($_GET['ref'])) return;
     $ref_id = absint($_GET['ref']);
     if ($ref_id > 0) {
+        $ref_user = get_user_by('id', $ref_id);
+        if (!$ref_user) return;
         $days = absint(get_option('omnixep_affiliate_cookie_days', 30));
         setcookie('omnixep_affiliate_ref', $ref_id, time() + ($days * DAY_IN_SECONDS), '/');
     }
@@ -32,13 +34,18 @@ add_action('init', function () {
 add_action('woocommerce_checkout_update_order_meta', function ($order_id) {
     if (empty($_COOKIE['omnixep_affiliate_ref'])) return;
     $ref_id = absint($_COOKIE['omnixep_affiliate_ref']);
-    if ($ref_id > 0 && (!is_user_logged_in() || get_current_user_id() !== $ref_id))
-        update_post_meta($order_id, '_omnixep_affiliate_id', $ref_id);
+    if ($ref_id <= 0) return;
+    $ref_user = get_user_by('id', $ref_id);
+    if (!$ref_user) return;
+    if (is_user_logged_in() && get_current_user_id() === $ref_id) return;
+    update_post_meta($order_id, '_omnixep_affiliate_id', $ref_id);
 });
 
 add_action('woocommerce_order_status_completed', function ($order_id) {
     $ref_user_id = get_post_meta($order_id, '_omnixep_affiliate_id', true);
     if (!$ref_user_id || get_post_meta($order_id, '_omnixep_commission_paid', true)) return;
+    $ref_user = get_user_by('id', $ref_user_id);
+    if (!$ref_user) return;
     $order = wc_get_order($order_id);
     if (!$order) return;
     $total = $order->get_subtotal();
@@ -60,6 +67,8 @@ add_action('woocommerce_order_status_cancelled', 'xepmarket2_affiliate_revert');
 function xepmarket2_affiliate_revert($order_id) {
     $ref_user_id = get_post_meta($order_id, '_omnixep_affiliate_id', true);
     if (!$ref_user_id || !get_post_meta($order_id, '_omnixep_commission_paid', true) || get_post_meta($order_id, '_omnixep_commission_reverted', true)) return;
+    $ref_user = get_user_by('id', $ref_user_id);
+    if (!$ref_user) return;
     $commission = floatval(get_post_meta($order_id, '_omnixep_commission_amount', true));
     if ($commission <= 0) return;
     $current_balance = floatval(get_user_meta($ref_user_id, 'omnixep_affiliate_balance', true));
@@ -140,14 +149,18 @@ add_action('admin_menu', function () {
 }, 20);
 
 function xepmarket2_affiliate_admin_page() {
-    if (isset($_POST['mark_paid'], $_POST['user_id']) && current_user_can('manage_woocommerce')) {
-        $u_id = absint($_POST['user_id']);
-        $current_unpaid = floatval(get_user_meta($u_id, 'omnixep_affiliate_balance', true));
-        if ($current_unpaid > 0) {
-            $current_paid = floatval(get_user_meta($u_id, 'omnixep_affiliate_paid_balance', true));
-            update_user_meta($u_id, 'omnixep_affiliate_paid_balance', $current_paid + $current_unpaid);
-            update_user_meta($u_id, 'omnixep_affiliate_balance', 0);
-            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Balance marked as paid.', 'xepmarket2') . '</p></div>';
+    if (isset($_POST['mark_paid'], $_POST['user_id'], $_POST['xep_aff_mark_paid_nonce']) && current_user_can('manage_woocommerce')) {
+        if (!wp_verify_nonce(sanitize_text_field($_POST['xep_aff_mark_paid_nonce']), 'xep_aff_mark_paid')) {
+            echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Security check failed. Please try again.', 'xepmarket2') . '</p></div>';
+        } else {
+            $u_id = absint($_POST['user_id']);
+            $current_unpaid = floatval(get_user_meta($u_id, 'omnixep_affiliate_balance', true));
+            if ($current_unpaid > 0) {
+                $current_paid = floatval(get_user_meta($u_id, 'omnixep_affiliate_paid_balance', true));
+                update_user_meta($u_id, 'omnixep_affiliate_paid_balance', $current_paid + $current_unpaid);
+                update_user_meta($u_id, 'omnixep_affiliate_balance', 0);
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Balance marked as paid.', 'xepmarket2') . '</p></div>';
+            }
         }
     }
     $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
@@ -195,7 +208,7 @@ function xepmarket2_affiliate_admin_page() {
                 <td><?php echo number_format($r['total_earned'], 2); ?> XEP (<?php echo $r['deals']; ?> <?php esc_html_e('deals', 'xepmarket2'); ?>)</td>
                 <td style="color:#00a32a;"><?php echo number_format($r['paid_balance'], 2); ?> XEP</td>
                 <td><?php echo number_format($r['balance'], 2); ?> XEP</td>
-                <td><?php if ($r['balance'] > 0): ?><form method="post" style="margin:0;" onsubmit="return confirm('<?php echo esc_js(__('Mark this balance as paid?', 'xepmarket2')); ?>');"><input type="hidden" name="user_id" value="<?php echo $u->ID; ?>"><button type="submit" name="mark_paid" class="button button-small"><?php esc_html_e('Mark as paid', 'xepmarket2'); ?></button></form><?php else: ?>—<?php endif; ?></td>
+                <td><?php if ($r['balance'] > 0): ?><form method="post" style="margin:0;" onsubmit="return confirm('<?php echo esc_js(__('Mark this balance as paid?', 'xepmarket2')); ?>');"><?php wp_nonce_field('xep_aff_mark_paid', 'xep_aff_mark_paid_nonce'); ?><input type="hidden" name="user_id" value="<?php echo $u->ID; ?>"><button type="submit" name="mark_paid" class="button button-small"><?php esc_html_e('Mark as paid', 'xepmarket2'); ?></button></form><?php else: ?>—<?php endif; ?></td>
             </tr>
         <?php endforeach; endif; ?></tbody>
     </table>

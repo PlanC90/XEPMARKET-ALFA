@@ -32,6 +32,11 @@ function xepmarket2_plugin_zip_endpoint()
         status_header(403);
         exit;
     }
+    // If user is logged in, require install_plugins so only admins can use the URL in browser
+    if (is_user_logged_in() && !current_user_can('install_plugins')) {
+        status_header(403);
+        exit;
+    }
 
     $temp_dir = get_temp_dir() . 'xepmarket2_zip_' . wp_generate_password(8, false) . '/';
     if (!wp_mkdir_p($temp_dir)) {
