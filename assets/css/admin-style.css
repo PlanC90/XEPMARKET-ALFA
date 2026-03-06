@@ -1,0 +1,315 @@
+/* 
+   XEPMARKET Premium Admin Design 
+   Modern, Dark, and User Friendly
+*/
+
+:root {
+    --admin-primary: #00f2ff;
+    --admin-secondary: #7000ff;
+    --admin-bg: #0f111a;
+    --admin-surface: #1a1d2b;
+    --admin-border: rgba(255, 255, 255, 0.08);
+    --admin-text: #ffffff;
+    --admin-text-muted: #a0a0b8;
+    --admin-radius: 12px;
+}
+
+/* Global Admin Overrides to prevent white bars */
+body.toplevel_page_xepmarket2-settings,
+body.toplevel_page_xepmarket2-settings #wpwrap,
+body.toplevel_page_xepmarket2-settings #wpcontent,
+body.toplevel_page_xepmarket2-settings #wpbody,
+body.toplevel_page_xepmarket2-settings #wpbody-content {
+    background: var(--admin-bg) !important;
+    min-height: 100vh !important;
+}
+
+/* Hide WP footer junk */
+body.toplevel_page_xepmarket2-settings #wpfooter {
+    display: none !important;
+}
+
+#wpcontent {
+    background: var(--admin-bg) !important;
+    padding-left: 0;
+}
+
+.xep-admin-wrap {
+    max-width: 1240px;
+    margin: 40px auto;
+    padding-bottom: 60px;
+    /* Extra padding at bottom */
+    color: var(--admin-text);
+    font-family: 'Inter', sans-serif;
+}
+
+.xep-admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 40px;
+    padding: 0 20px;
+}
+
+.xep-admin-banner-area {
+    width: 100%;
+    margin-bottom: 30px;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid var(--admin-border);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.xep-admin-banner-area img {
+    width: 100%;
+    display: block;
+    object-fit: cover;
+    max-height: 250px;
+}
+
+.xep-admin-title h1 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 32px;
+    font-weight: 800;
+    margin: 0;
+    color: #fff;
+}
+
+.xep-logo-accent {
+    background: linear-gradient(135deg, var(--admin-primary), var(--admin-secondary));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.xep-admin-container {
+    display: flex;
+    gap: 30px;
+    background: var(--admin-surface);
+    border: 1px solid var(--admin-border);
+    border-radius: 20px;
+    min-height: 600px;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Sidebar Tabs */
+.xep-admin-sidebar {
+    width: 260px;
+    background: rgba(0, 0, 0, 0.2);
+    border-right: 1px solid var(--admin-border);
+    padding: 30px 0;
+}
+
+.xep-nav-item {
+    padding: 15px 30px;
+    color: var(--admin-text-muted);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all 0.3s ease;
+    border-left: 3px solid transparent;
+}
+
+.xep-nav-item i {
+    font-size: 18px;
+    width: 20px;
+}
+
+.xep-nav-item:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.xep-nav-item.active {
+    color: var(--admin-primary);
+    background: rgba(var(--admin-primary-rgb), 0.1);
+    border-left-color: var(--admin-primary);
+}
+
+/* Content Area */
+.xep-admin-content {
+    flex: 1;
+    padding: 40px;
+    height: 100%;
+}
+
+.xep-tab-content {
+    display: none;
+}
+
+.xep-tab-content.active {
+    display: block;
+    animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Form Styles */
+.xep-form-group {
+    margin-bottom: 30px;
+}
+
+.xep-form-group label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.xep-form-group input[type="text"],
+.xep-form-group input[type="number"],
+.xep-form-group textarea,
+.xep-form-group select {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    padding: 15px;
+    color: #fff;
+    font-size: 15px;
+    transition: all 0.3s ease;
+}
+
+.xep-form-group input:focus,
+.xep-form-group textarea:focus {
+    border-color: var(--admin-primary);
+    background: rgba(255, 255, 255, 0.06);
+    outline: none;
+    box-shadow: 0 0 15px rgba(0, 242, 255, 0.1);
+}
+
+.xep-form-group .description {
+    color: var(--admin-text-muted);
+    font-size: 13px;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+/* Grid Layout for Groups */
+.xep-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.xep-section-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--admin-border);
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 30px;
+}
+
+.xep-section-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    border-bottom: 1px solid var(--admin-border);
+    padding-bottom: 15px;
+    color: var(--admin-primary);
+}
+
+/* Switch Styling */
+.xep-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+}
+
+.xep-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.xep-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.1);
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.xep-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked+.xep-slider {
+    background: linear-gradient(135deg, var(--admin-primary), var(--admin-secondary));
+}
+
+input:checked+.xep-slider:before {
+    transform: translateX(26px);
+}
+
+/* Fixed Save Buttons - More Specificity */
+.xep-admin-wrap .xep-save-btn,
+.xep-admin-wrap input[type="submit"].xep-save-btn,
+.xep-admin-wrap button.xep-save-btn {
+    background: linear-gradient(135deg, var(--admin-primary), var(--admin-secondary)) !important;
+    border: none !important;
+    color: #000 !important;
+    /* Black text on neon background */
+    padding: 12px 35px !important;
+    font-weight: 850 !important;
+    border-radius: 100px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1.5px !important;
+    cursor: pointer !important;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    box-shadow: 0 10px 25px rgba(0, 242, 255, 0.3) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px !important;
+    height: auto !important;
+    line-height: 1 !important;
+    opacity: 1 !important;
+    text-decoration: none !important;
+}
+
+.xep-admin-wrap .xep-save-btn:hover {
+    transform: translateY(-3px) scale(1.02) !important;
+    box-shadow: 0 15px 35px rgba(0, 242, 255, 0.5) !important;
+    filter: brightness(1.1);
+}
+
+.xep-admin-wrap .xep-save-btn:active {
+    transform: translateY(-1px) scale(0.98) !important;
+}
+
+/* Hide standard WP notices and junk on this page */
+.toplevel_page_xepmarket2-settings #wpbody-content>.notice,
+.toplevel_page_xepmarket2-settings #screen-meta-links,
+.toplevel_page_xepmarket2-settings .update-nag {
+    display: none !important;
+}
