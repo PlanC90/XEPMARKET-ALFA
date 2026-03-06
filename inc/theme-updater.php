@@ -319,12 +319,18 @@ class XepMarket_Theme_Updater
             $style_file = $theme_root ? $theme_root . '/style.css' : '';
             $version_on_disk = '';
             if ($style_file && is_readable($style_file)) {
-                $content = file_get_contents($style_file, false, null, 0, 2048);
-                if ($content && preg_match('/^\s*\*\s*Version:\s*(\S+)/m', $content, $m)) {
-                    $version_on_disk = trim($m[1]);
+                $file_data = get_file_data($style_file, array('Version' => 'Version'));
+                if (!empty($file_data['Version'])) {
+                    $version_on_disk = trim($file_data['Version']);
+                } else {
+                    // Fallback regex if get_file_data fails
+                    $content = file_get_contents($style_file, false, null, 0, 2048);
+                    if ($content && preg_match('/^[ \t\/*#@]*Version:\s*(.*)$/mi', $content, $m)) {
+                        $version_on_disk = trim($m[1]);
+                    }
                 }
             }
-            if ($expected_version && $version_on_disk !== $expected_version) {
+            if ($expected_version && (empty($version_on_disk) || version_compare($version_on_disk, $expected_version, '<'))) {
                 error_log("XEP Update: Version on disk ({$version_on_disk}) does not match expected ({$expected_version}). Clearing caches.");
                 wp_clean_themes_cache();
                 if (function_exists('wp_cache_flush')) {
@@ -458,15 +464,27 @@ class XepMarket_Theme_Updater
         }
 
         $corrected_source = trailingslashit($remote_source) . $this->theme_slug . '/';
+        
+        // Ensure the parent directory exists if theme_slug has slashes (e.g. nested themes)
+        if (strpos($this->theme_slug, '/') !== false) {
+            $parent_dir = dirname($corrected_source);
+            if (!$wp_filesystem->is_dir($parent_dir)) {
+                $wp_filesystem->mkdir($parent_dir, FS_CHMOD_DIR);
+            }
+        }
+
         if (!$wp_filesystem->move($source, $corrected_source, true)) {
+            // Log warning if move fails, but try to continue
+            error_log("XEP Update: Failed to rename source folder from $source to $corrected_source");
             return $source;
         }
 
-        // If GitHub zip has theme in a subfolder (e.g. repo root = XEPMARKET-ALFA/ with style.css inside), use that so the right files are installed
-        $inner = trailingslashit($corrected_source) . $this->theme_slug . '/';
-        if ($wp_filesystem->exists($inner . 'style.css')) {
-            return $inner;
+        // Check if there is a deeply nested GitHub folder due to how zips are created
+        $inner_folder_guess = trailingslashit($corrected_source) . basename($this->theme_slug) . '/';
+        if ($wp_filesystem->exists($inner_folder_guess . 'style.css')) {
+            return $inner_folder_guess;
         }
+        
         return $corrected_source;
     }
 }
