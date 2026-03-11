@@ -1,13 +1,2 @@
-node_modules/
-vendor/
-*.pem
-*.key
-*.p12
-*.keystore
-*.env
-.env.local
-.DS_Store
-Thumbs.db
-.vscode/
-dist/
-build/
+git.bat
+guncelle.bat

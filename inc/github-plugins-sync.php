@@ -13,7 +13,6 @@ define('XEPMARKET2_GITHUB_SYNC_NONCE_ACTION', 'xepmarket2_github_plugins_sync');
 // Allowlist of plugin folders that can be packaged into a single-plugin zip for TGMPA.
 // Keep this limited to known slugs for security; token is required too.
 define('XEPMARKET2_PLUGIN_ZIP_SLUGS', [
-    'woocommerce',
     'omnixep-woocommerce',
     'classic-editor',
     'mailin',

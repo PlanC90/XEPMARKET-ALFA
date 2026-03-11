@@ -140,7 +140,7 @@ function xepmarket2_setup()
 
     // Force product category/tag archives to use woocommerce.php so products display (fixes "Nothing Found")
     add_filter('template_include', function ($template) {
-        if (function_exists('is_product_taxonomy') && is_product_taxonomy() && (is_product_category() || is_product_tag())) {
+        if (function_exists('is_product_taxonomy') && is_product_taxonomy() && ( (function_exists('is_product_category') && is_product_category()) || (function_exists('is_product_tag') && is_product_tag()) )) {
             $woo_template = get_template_directory() . '/woocommerce.php';
             if (file_exists($woo_template)) {
                 return $woo_template;
@@ -557,7 +557,7 @@ function xepmarket2_shop_category_bar() {
     if (is_wp_error($terms) || empty($terms)) {
         return;
     }
-    $current_id = is_product_category() ? get_queried_object_id() : 0;
+    $current_id = (function_exists('is_product_category') && is_product_category()) ? get_queried_object_id() : 0;
     $shop_url   = get_permalink(wc_get_page_id('shop'));
     echo '<div class="xep-shop-category-bar" role="navigation" aria-label="' . esc_attr__('Product categories', 'woocommerce') . '">';
     echo '<a href="' . esc_url($shop_url) . '" class="xep-cat-pill' . ($current_id === 0 ? ' active' : '') . '">' . esc_html__('All', 'woocommerce') . '</a>';
@@ -1605,6 +1605,9 @@ function xepmarket2_settings_page()
                     <div class="xep-nav-item" data-tab="tab-sections">
                         <i class="fas fa-th-large"></i> Page Sections
                     </div>
+                    <div class="xep-nav-item" data-tab="tab-flash-deals">
+                        <i class="fas fa-bolt"></i> Flash Deals
+                    </div>
                     <div class="xep-nav-item" data-tab="tab-modules">
                         <i class="fas fa-puzzle-piece"></i> Theme Modules
                     </div>
@@ -2024,6 +2027,7 @@ function xepmarket2_settings_page()
                             <h3>Main Hero Interaction</h3>
                             <div class="xep-form-group" style="display: flex; align-items: center; gap: 15px;">
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_slider_enable" value="0" />
                                     <input type="checkbox" name="xepmarket2_slider_enable" value="1" <?php checked(1, get_option('xepmarket2_slider_enable'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2163,43 +2167,6 @@ function xepmarket2_settings_page()
                         </div>
 
                         <div class="xep-section-card">
-                            <h3>Flash Deals (Sale Products Slider)</h3>
-                            <div class="xep-form-group"
-                                style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--admin-border); padding-bottom: 20px; margin-bottom: 20px;">
-                                <div>
-                                    <div style="font-weight: 700; font-size: 16px;">Enable Flash Deals</div>
-                                    <div class="description">Show the on-sale products slider above Trending Gear.</div>
-                                </div>
-                                <label class="xep-switch">
-                                    <input type="checkbox" name="xepmarket2_flash_deals_enable" value="1" <?php checked(1, get_option('xepmarket2_flash_deals_enable', '1'), true); ?> />
-                                    <span class="xep-slider"></span>
-                                </label>
-                            </div>
-                            <div class="xep-form-group">
-                                <label>Section Title (HTML Allowed)</label>
-                                <input type="text" name="xepmarket2_flash_deals_title"
-                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_title', 'Flash <span class="logo-accent">Deals</span>')); ?>" />
-                            </div>
-                            <div class="xep-form-group">
-                                <label>Section Subtitle</label>
-                                <input type="text" name="xepmarket2_flash_deals_subtitle"
-                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_subtitle', 'Exclusive discounts on premium gear.')); ?>" />
-                            </div>
-                            <div class="xep-grid-2">
-                                <div class="xep-form-group">
-                                    <label>Total Products to Show</label>
-                                    <input type="number" name="xepmarket2_flash_deals_limit"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_limit', '12')); ?>" />
-                                </div>
-                                <div class="xep-form-group">
-                                    <label>Columns</label>
-                                    <input type="number" name="xepmarket2_flash_deals_columns"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_columns', '4')); ?>" />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="xep-section-card">
                             <h3>Trending Gear (Products)</h3>
                             <div class="xep-form-group">
                                 <label>Section Title</label>
@@ -2225,6 +2192,47 @@ function xepmarket2_settings_page()
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Tab: Flash Deals -->
+                    <div id="tab-flash-deals" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Flash Deals Settings</h3>
+                            <div class="xep-form-group"
+                                style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--admin-border); padding-bottom: 20px; margin-bottom: 20px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 16px;">Enable Flash Deals</div>
+                                    <div class="description">Show the on-sale products slider above Trending Gear.</div>
+                                </div>
+                                <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_flash_deals_enable" value="0" />
+                                    <input type="checkbox" name="xepmarket2_flash_deals_enable" value="1" <?php checked(1, get_option('xepmarket2_flash_deals_enable', '1'), true); ?> />
+                                    <span class="xep-slider"></span>
+                                </label>
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Flash Deals Title (HTML Allowed)</label>
+                                <input type="text" name="xepmarket2_flash_deals_title"
+                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_title', 'Flash <span class="logo-accent">Deals</span>')); ?>" />
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Flash Deals Subtitle</label>
+                                <input type="text" name="xepmarket2_flash_deals_subtitle"
+                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_subtitle', 'Exclusive discounts on premium gear.')); ?>" />
+                            </div>
+                            <div class="xep-grid-2">
+                                <div class="xep-form-group">
+                                    <label>Total Products to Show</label>
+                                    <input type="number" name="xepmarket2_flash_deals_limit"
+                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_limit', '12')); ?>" />
+                                </div>
+                                <div class="xep-form-group">
+                                    <label>Columns</label>
+                                    <input type="number" name="xepmarket2_flash_deals_columns"
+                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_columns', '4')); ?>" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Tab: Modules -->
                     <div id="tab-modules" class="xep-tab-content">
@@ -2241,6 +2249,7 @@ function xepmarket2_settings_page()
                                         checkout.</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_omnixep_restrict" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_omnixep_restrict" value="1" <?php checked(1, get_option('xepmarket2_mod_omnixep_restrict', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2254,6 +2263,7 @@ function xepmarket2_settings_page()
                                         field).</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_custom_checkout" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_custom_checkout" value="1" <?php checked(1, get_option('xepmarket2_mod_custom_checkout', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2267,6 +2277,7 @@ function xepmarket2_settings_page()
                                         "Sale!".</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_sale_badges" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_sale_badges" value="1" <?php checked(1, get_option('xepmarket2_mod_sale_badges', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2279,6 +2290,7 @@ function xepmarket2_settings_page()
                                     <div class="description">Enable premium styling for WooCommerce breadcrumbs.</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_breadcrumb_modern" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_breadcrumb_modern" value="1" <?php checked(1, get_option('xepmarket2_mod_breadcrumb_modern', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -4064,5 +4076,209 @@ function xepmarket2_apply_custom_shipping_rates($rates, $package) {
     
     // Wipe existing rates and force our custom rule
     return array($rate_id => $new_rate);
+}
+
+
+
+/**
+ * Enhanced Checkout UX - Create Account & Password Strength
+ */
+add_action('wp_footer', 'xepmarket2_enhanced_checkout_ux');
+function xepmarket2_enhanced_checkout_ux() {
+    if (!is_checkout() || is_wc_endpoint_url('order-received')) {
+        return;
+    }
+    ?>
+    <style>
+        /* Make "Create an account?" more prominent */
+        .woocommerce-form__label-for-checkbox.create-account {
+            background: rgba(0, 242, 255, 0.05) !important;
+            border: 1px solid rgba(0, 242, 255, 0.2) !important;
+            border-radius: 15px !important;
+            padding: 20px !important;
+            margin: 20px 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            cursor: pointer !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .woocommerce-form__label-for-checkbox.create-account:hover {
+            background: rgba(0, 242, 255, 0.08) !important;
+            border-color: rgba(0, 242, 255, 0.4) !important;
+        }
+        
+        .woocommerce-form__label-for-checkbox.create-account input[type="checkbox"] {
+            width: 20px !important;
+            height: 20px !important;
+            margin: 0 !important;
+            cursor: pointer !important;
+            flex-shrink: 0 !important;
+        }
+        
+        .woocommerce-form__label-for-checkbox.create-account span {
+            font-size: 16px !important;
+            font-weight: 600 !important;
+            color: #00f2ff !important;
+            flex: 1 !important;
+        }
+        
+        /* Password strength indicator */
+        .xep-password-strength-wrapper {
+            margin-top: 10px;
+            display: none;
+        }
+        
+        .xep-password-strength-wrapper.active {
+            display: block;
+        }
+        
+        .xep-password-strength-bar {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        
+        .xep-password-strength-fill {
+            height: 100%;
+            width: 0%;
+            transition: all 0.3s ease;
+            border-radius: 3px;
+        }
+        
+        .xep-password-strength-fill.weak {
+            width: 33%;
+            background: #ff453a;
+        }
+        
+        .xep-password-strength-fill.medium {
+            width: 66%;
+            background: #ff9f0a;
+        }
+        
+        .xep-password-strength-fill.strong {
+            width: 100%;
+            background: #30d158;
+        }
+        
+        .xep-password-strength-text {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .xep-password-strength-text.weak {
+            color: #ff453a;
+        }
+        
+        .xep-password-strength-text.medium {
+            color: #ff9f0a;
+        }
+        
+        .xep-password-strength-text.strong {
+            color: #30d158;
+        }
+        
+        .xep-password-requirements {
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        
+        .xep-password-req {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255, 255, 255, 0.5);
+            transition: color 0.3s ease;
+        }
+        
+        .xep-password-req.met {
+            color: #30d158;
+        }
+        
+        .xep-password-req i {
+            width: 16px;
+            font-size: 12px;
+        }
+    </style>
+    
+    <script>
+    (function($) {
+        $(document).ready(function() {
+            // Add password strength indicator
+            var $passwordField = $('#account_password');
+            if ($passwordField.length) {
+                var strengthHTML = '<div class="xep-password-strength-wrapper">' +
+                    '<div class="xep-password-strength-bar">' +
+                        '<div class="xep-password-strength-fill"></div>' +
+                    '</div>' +
+                    '<div class="xep-password-strength-text"></div>' +
+                    '<div class="xep-password-requirements">' +
+                        '<div class="xep-password-req" data-req="length"><i class="fas fa-circle"></i> At least 8 characters</div>' +
+                        '<div class="xep-password-req" data-req="uppercase"><i class="fas fa-circle"></i> At least 1 uppercase letter</div>' +
+                        '<div class="xep-password-req" data-req="lowercase"><i class="fas fa-circle"></i> At least 1 lowercase letter</div>' +
+                        '<div class="xep-password-req" data-req="number"><i class="fas fa-circle"></i> At least 1 number</div>' +
+                    '</div>' +
+                '</div>';
+                
+                $passwordField.after(strengthHTML);
+                
+                var $wrapper = $passwordField.next('.xep-password-strength-wrapper');
+                var $fill = $wrapper.find('.xep-password-strength-fill');
+                var $text = $wrapper.find('.xep-password-strength-text');
+                
+                $passwordField.on('input', function() {
+                    var password = $(this).val();
+                    
+                    if (password.length === 0) {
+                        $wrapper.removeClass('active');
+                        return;
+                    }
+                    
+                    $wrapper.addClass('active');
+                    
+                    // Check requirements
+                    var hasLength = password.length >= 8;
+                    var hasUppercase = /[A-Z]/.test(password);
+                    var hasLowercase = /[a-z]/.test(password);
+                    var hasNumber = /[0-9]/.test(password);
+                    
+                    // Update requirement indicators
+                    $wrapper.find('[data-req="length"]').toggleClass('met', hasLength);
+                    $wrapper.find('[data-req="uppercase"]').toggleClass('met', hasUppercase);
+                    $wrapper.find('[data-req="lowercase"]').toggleClass('met', hasLowercase);
+                    $wrapper.find('[data-req="number"]').toggleClass('met', hasNumber);
+                    
+                    // Calculate strength
+                    var metCount = [hasLength, hasUppercase, hasLowercase, hasNumber].filter(Boolean).length;
+                    
+                    $fill.removeClass('weak medium strong');
+                    $text.removeClass('weak medium strong');
+                    
+                    if (metCount <= 2) {
+                        $fill.addClass('weak');
+                        $text.addClass('weak').html('<i class="fas fa-exclamation-triangle"></i> Weak password');
+                    } else if (metCount === 3) {
+                        $fill.addClass('medium');
+                        $text.addClass('medium').html('<i class="fas fa-check-circle"></i> Medium password');
+                    } else {
+                        $fill.addClass('strong');
+                        $text.addClass('strong').html('<i class="fas fa-shield-alt"></i> Strong password');
+                    }
+                });
+            }
+        });
+    })(jQuery);
+    </script>
+    <?php
 }
 

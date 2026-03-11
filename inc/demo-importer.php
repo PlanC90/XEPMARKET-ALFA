@@ -82,8 +82,8 @@ function xepmarket2_setup_demo_data($apply_theme_defaults = true)
                 update_option('wp_page_for_privacy_policy', $page_id);
             }
         } else {
-            // Update content if page exists but content is empty
-            if (empty($exists->post_content) && !empty($data['content'])) {
+            // Always update content if demo data is provided (Force refresh)
+            if (!empty($data['content'])) {
                 wp_update_post(array(
                     'ID' => $exists->ID,
                     'post_content' => $data['content'],

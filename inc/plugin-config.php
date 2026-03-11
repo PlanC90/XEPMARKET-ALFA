@@ -32,52 +32,63 @@ function xepmarket2_get_plugin_expected_version($slug)
 function xepmarket2_register_required_plugins()
 {
     $plugin_path = get_template_directory() . '/inc/plugins/';
+    $is_woo_active = class_exists('WooCommerce');
 
-    $plugins = array(
-        // ── Core Plugins (Required) ──
-        array(
+    $plugins = array();
+
+    // 1. STEP: WooCommerce must be installed and active FIRST.
+    // We only register WooCommerce until it is activated.
+    if (!$is_woo_active) {
+        $plugins[] = array(
             'name' => 'WooCommerce',
             'slug' => 'woocommerce',
             'required' => true,
-            'source' => xepmarket2_get_github_plugin_zip_url('woocommerce') ?: null,
-        ),
-        array(
-            'name' => 'OmniXEP WooCommerce Payment Gateway',
-            'slug' => 'omnixep-woocommerce',
-            'source' => xepmarket2_get_github_plugin_zip_url('omnixep-woocommerce') ?: $plugin_path . 'omnixep-woocommerce.zip',
-            'required' => true,
-            'version' => xepmarket2_get_plugin_expected_version('omnixep-woocommerce'),
-            'force_activation' => false,
-            'force_deactivation' => false,
-        ),
-        // OmniXEP Affiliate: not in TGMPA – built into theme (Settings → Affiliate tab). No plugin needed.
-
-        // ── Bundled Modules (Recommended) ──
-        array(
-            'name' => 'ALD – AliExpress Dropshipping',
-            'slug' => 'woo-alidropship',
-            'source' => xepmarket2_get_github_plugin_zip_url('woo-alidropship') ?: 'woo-alidropship.zip',
-            'required' => false,
-        ),
-        array(
-            'name' => 'Product Variations Swatches',
-            'slug' => 'product-variations-swatches-for-woocommerce',
-            'source' => xepmarket2_get_github_plugin_zip_url('product-variations-swatches-for-woocommerce') ?: 'product-variations-swatches-for-woocommerce.zip',
-            'required' => false,
-        ),
-        array(
-            'name' => 'Additional Variation Gallery',
-            'slug' => 'vargal-additional-variation-gallery-for-woo',
-            'source' => xepmarket2_get_github_plugin_zip_url('vargal-additional-variation-gallery-for-woo') ?: 'vargal-additional-variation-gallery-for-woo.zip',
-            'required' => false,
-        ),
-        array(
-            'name' => 'Orders Tracking',
-            'slug' => 'woo-orders-tracking',
-            'source' => xepmarket2_get_github_plugin_zip_url('woo-orders-tracking') ?: 'woo-orders-tracking.zip',
-            'required' => false,
-        ),
-    );
+        );
+    } 
+    // 2. STEP: Once WooCommerce is active, we register all other dependent modules.
+    else {
+        $plugins = array(
+            array(
+                'name' => 'WooCommerce',
+                'slug' => 'woocommerce',
+                'required' => true,
+            ),
+            array(
+                'name' => 'OmniXEP WooCommerce Payment Gateway',
+                'slug' => 'omnixep-woocommerce',
+                'source' => xepmarket2_get_github_plugin_zip_url('omnixep-woocommerce') ?: $plugin_path . 'omnixep-woocommerce.zip',
+                'required' => true,
+                'version' => xepmarket2_get_plugin_expected_version('omnixep-woocommerce'),
+                'force_activation' => false,
+                'force_deactivation' => false,
+            ),
+            // ── Bundled Modules (Recommended) ──
+            array(
+                'name' => 'ALD – AliExpress Dropshipping',
+                'slug' => 'woo-alidropship',
+                'source' => xepmarket2_get_github_plugin_zip_url('woo-alidropship') ?: 'woo-alidropship.zip',
+                'required' => false,
+            ),
+            array(
+                'name' => 'Product Variations Swatches',
+                'slug' => 'product-variations-swatches-for-woocommerce',
+                'source' => xepmarket2_get_github_plugin_zip_url('product-variations-swatches-for-woocommerce') ?: 'product-variations-swatches-for-woocommerce.zip',
+                'required' => false,
+            ),
+            array(
+                'name' => 'Additional Variation Gallery',
+                'slug' => 'vargal-additional-variation-gallery-for-woo',
+                'source' => xepmarket2_get_github_plugin_zip_url('vargal-additional-variation-gallery-for-woo') ?: 'vargal-additional-variation-gallery-for-woo.zip',
+                'required' => false,
+            ),
+            array(
+                'name' => 'Orders Tracking',
+                'slug' => 'woo-orders-tracking',
+                'source' => xepmarket2_get_github_plugin_zip_url('woo-orders-tracking') ?: 'woo-orders-tracking.zip',
+                'required' => false,
+            ),
+        );
+    }
 
     $config = array(
         'id' => 'xepmarket2',
