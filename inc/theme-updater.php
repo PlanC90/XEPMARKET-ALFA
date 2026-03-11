@@ -90,20 +90,20 @@ class XepMarket_Theme_Updater
         }
         ?>
         <div class="xep-section-card">
-            <h3 style="color: var(--admin-primary);"><i class="fas fa-sync-alt"></i> GitHub Auto-Updater</h3>
+            <h3 style="color: var(--admin-primary);"><i class="fas fa-sync-alt"></i> Auto-Updater</h3>
             <p class="description" style="margin-bottom: 25px;">Automatically check for theme updates from GitHub.</p>
 
             <div
-                style="background: rgba(255,255,255,0.02); padding: 30px; border-radius: 12px; border: 1px solid var(--admin-border); max-width: 600px;">
-                <table class="form-table">
+                style="background: rgba(255,255,255,0.02); padding: 30px; border-radius: 12px; border: 1px solid var(--admin-border); max-width: 650px; margin: 0 auto; box-sizing: border-box;">
+                <table class="form-table" style="width: 100%; margin: 0;">
                     <tr>
-                        <th scope="row" style="color: #fff; font-weight: 600;"><label style="color: #fff;">Current Version:</label></th>
+                        <th scope="row" style="color: #fff; font-weight: 600; width: 180px;"><label style="color: #fff;">Current Version:</label></th>
                         <td><strong style="font-size: 16px;">
                                 <?php echo esc_html($current_version); ?>
                             </strong></td>
                     </tr>
                     <tr>
-                        <th scope="row" style="color: #fff; font-weight: 600;"><label style="color: #fff;">Latest GitHub Version:</label></th>
+                        <th scope="row" style="color: #fff; font-weight: 600; width: 180px;"><label style="color: #fff;">Latest Version:</label></th>
                         <td>
                             <strong style="font-size: 16px;">
                                 <?php echo esc_html($latest_version_str); ?>
@@ -313,10 +313,15 @@ class XepMarket_Theme_Updater
             delete_site_transient('update_themes');
             delete_transient('xepmarket2_github_release');
 
-            // Force a hard refresh of theme data from disk
-            wp_clean_themes_cache();
+            // Force a hard refresh of theme data from             wp_clean_themes_cache();
             $theme = wp_get_theme($this->theme_slug);
-            $theme_root = $theme && $theme->exists() ? $theme->get_stylesheet_directory() : '';
+            
+            // If theme slug doesn't return theme, try current theme
+            if (!$theme->exists()) {
+                $theme = wp_get_theme();
+            }
+
+            $theme_root = $theme->exists() ? $theme->get_stylesheet_directory() : '';
             $style_file = $theme_root ? $theme_root . '/style.css' : '';
             $version_on_disk = '';
             
@@ -327,16 +332,24 @@ class XepMarket_Theme_Updater
                 }
             }
 
-            if ($expected_version && (empty($version_on_disk) || version_compare($version_on_disk, $expected_version, '<'))) {
-                error_log("XEP Update: Version on disk ({$version_on_disk}) still older than expected ({$expected_version}).");
+            error_log("XEP Update Result: Expected {$expected_version}, Found on disk: " . ($version_on_disk ?: 'UNKNOWN'));
+
+            // If we have a version but it's still older, it might be the expected "Critical Error" / fail case
+            if ($expected_version && !empty($version_on_disk) && version_compare($version_on_disk, $expected_version, '<')) {
                 wp_send_json_error(
-                    'UPDATE COMPLETED BUT THEME FILES ARE STILL SHOWING OLD VERSION (' . ($version_on_disk ?: 'unknown') . '). This usually means the server has a strong file cache or the folder structure in the GitHub ZIP is different. Please refresh the page and check the version again. If it still shows the old version, use the "Manual Installation" link below or update via FTP.'
+                    'UPDATE COMPLETED BUT THEME FILES ARE STILL SHOWING OLD VERSION (' . $version_on_disk . '). This usually means the server has a strong file cache or the folder structure in the GitHub ZIP is different. Please refresh the page. If it still shows the old version, use the "Manual Installation" link below.'
                 );
             }
 
-            error_log("XEP Update Success! Version on disk: " . ($version_on_disk ?: 'unknown'));
+            // If version is empty (unknown), don't treat it as a hard error if upgrade() returned true
+            // Just warn the user to refresh.
+            $message = 'Theme updated successfully.';
+            if (empty($version_on_disk)) {
+                $message .= ' Note: Could not verify version on disk immediately (might be cached). Please refresh the page.';
+            }
+
             wp_send_json_success(array(
-                'message' => 'Theme updated successfully to latest version.',
+                'message' => $message,
                 'version' => $version_on_disk ?: $expected_version
             ));
         } catch (Exception $e) {

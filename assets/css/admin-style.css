@@ -82,9 +82,16 @@ body.toplevel_page_xepmarket2-settings #wpfooter {
     -webkit-text-fill-color: transparent;
 }
 
+/* Force box-sizing on all admin elements */
+.xep-admin-wrap,
+.xep-admin-wrap *,
+.xep-admin-wrap *::before,
+.xep-admin-wrap *::after {
+    box-sizing: border-box;
+}
+
 .xep-admin-container {
     display: flex;
-    gap: 30px;
     background: var(--admin-surface);
     border: 1px solid var(--admin-border);
     border-radius: 20px;
@@ -96,6 +103,8 @@ body.toplevel_page_xepmarket2-settings #wpfooter {
 /* Sidebar Tabs */
 .xep-admin-sidebar {
     width: 260px;
+    min-width: 260px;
+    flex-shrink: 0;
     background: rgba(0, 0, 0, 0.2);
     border-right: 1px solid var(--admin-border);
     padding: 30px 0;
@@ -130,20 +139,27 @@ body.toplevel_page_xepmarket2-settings #wpfooter {
     border-left-color: var(--admin-primary);
 }
 
-/* Content Area */
+/* Content Area - symmetric padding guaranteed */
 .xep-admin-content {
     flex: 1;
-    padding: 40px;
-    height: 100%;
+    min-width: 0;
+    padding: 30px !important;
 }
 
 .xep-tab-content {
     display: none;
+    width: 100% !important;
 }
 
 .xep-tab-content.active {
-    display: block;
+    display: block !important;
+    width: 100% !important;
     animation: fadeIn 0.4s ease;
+}
+
+.xep-admin-content .xep-section-card {
+    width: 100% !important;
+    max-width: 100% !important;
 }
 
 @keyframes fadeIn {
@@ -214,7 +230,7 @@ body.toplevel_page_xepmarket2-settings #wpfooter {
     border: 1px solid var(--admin-border);
     border-radius: 16px;
     padding: 25px;
-    margin-bottom: 30px;
+    margin: 0 auto 30px auto;
 }
 
 .xep-section-card h3 {
