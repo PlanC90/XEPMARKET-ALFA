@@ -140,11 +140,7 @@ function xepmarket2_setup()
 
     // Force product category/tag archives to use woocommerce.php so products display (fixes "Nothing Found")
     add_filter('template_include', function ($template) {
-<<<<<<< HEAD
         if (function_exists('is_product_taxonomy') && is_product_taxonomy() && ( (function_exists('is_product_category') && is_product_category()) || (function_exists('is_product_tag') && is_product_tag()) )) {
-=======
-        if (function_exists('is_product_taxonomy') && is_product_taxonomy() && (is_product_category() || is_product_tag())) {
->>>>>>> 2862f89dd03a2ed2846459f016ce3f1cc4b3b696
             $woo_template = get_template_directory() . '/woocommerce.php';
             if (file_exists($woo_template)) {
                 return $woo_template;
@@ -561,11 +557,7 @@ function xepmarket2_shop_category_bar() {
     if (is_wp_error($terms) || empty($terms)) {
         return;
     }
-<<<<<<< HEAD
     $current_id = (function_exists('is_product_category') && is_product_category()) ? get_queried_object_id() : 0;
-=======
-    $current_id = is_product_category() ? get_queried_object_id() : 0;
->>>>>>> 2862f89dd03a2ed2846459f016ce3f1cc4b3b696
     $shop_url   = get_permalink(wc_get_page_id('shop'));
     echo '<div class="xep-shop-category-bar" role="navigation" aria-label="' . esc_attr__('Product categories', 'woocommerce') . '">';
     echo '<a href="' . esc_url($shop_url) . '" class="xep-cat-pill' . ($current_id === 0 ? ' active' : '') . '">' . esc_html__('All', 'woocommerce') . '</a>';
@@ -4086,7 +4078,6 @@ function xepmarket2_apply_custom_shipping_rates($rates, $package) {
     return array($rate_id => $new_rate);
 }
 
-<<<<<<< HEAD
 
 
 /**
@@ -4290,6 +4281,3 @@ function xepmarket2_enhanced_checkout_ux() {
     </script>
     <?php
 }
-
-=======
->>>>>>> 2862f89dd03a2ed2846459f016ce3f1cc4b3b696
