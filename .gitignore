@@ -1,2 +1,14 @@
-git.bat
+node_modules/
+vendor/
+*.pem
+*.key
+*.p12
+*.keystore
+*.env
+.env.local
+.DS_Store
+Thumbs.db
+.vscode/
+dist/
+build/
 guncelle.bat
