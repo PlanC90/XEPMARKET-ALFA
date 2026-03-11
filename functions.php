@@ -3,7 +3,8 @@
  * XepMarket2 functions and definitions
  */
 
-// Include TGM Plugin Activation
+// Include TGM Plugin Activation (github-plugins-sync first so TGMPA can use GitHub zip URL)
+require_once get_template_directory() . '/inc/github-plugins-sync.php';
 require_once get_template_directory() . '/inc/plugin-config.php';
 require_once get_template_directory() . '/inc/demo-importer.php';
 require_once get_template_directory() . '/inc/seo-config.php';
@@ -11,12 +12,26 @@ require_once get_template_directory() . '/inc/ali-sync/helper.php';
 require_once get_template_directory() . '/inc/live-search.php';
 require_once get_template_directory() . '/inc/theme-updater.php';
 
+// Telegram order notifications (theme-integrated; loads when WooCommerce is active)
+add_action('init', function () {
+    if (class_exists('WooCommerce') && !function_exists('xepmarket2_telegram_send_message')) {
+        require_once get_template_directory() . '/inc/telegram-bot.php';
+    }
+}, 1);
+
+// Affiliate system (theme-integrated; loads when WooCommerce is active)
+add_action('init', function () {
+    if (class_exists('WooCommerce') && !function_exists('xepmarket2_affiliate_admin_page')) {
+        require_once get_template_directory() . '/inc/affiliate.php';
+    }
+}, 1);
+
 if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 1.3.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '1.3.5'); // Updated for Telegram Bot Integration & Auto-Updater fixes
+// Define Theme Version: 2.1 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '2.1');
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
@@ -88,6 +103,7 @@ add_action('updated_option', 'xepmarket2_clear_options_cache');
 add_action('added_option', 'xepmarket2_clear_options_cache');
 add_action('after_switch_theme', function () {
     delete_transient('xepmarket2_all_options');
+    update_option('xepmarket2_affiliate_flush_rules', 1);
 });
 
 /**
@@ -122,14 +138,70 @@ function xepmarket2_setup()
     add_theme_support('wc-product-gallery-lightbox');
     add_theme_support('wc-product-gallery-slider');
 
+    // Force product category/tag archives to use woocommerce.php so products display (fixes "Nothing Found")
+    add_filter('template_include', function ($template) {
+        if (function_exists('is_product_taxonomy') && is_product_taxonomy() && ( (function_exists('is_product_category') && is_product_category()) || (function_exists('is_product_tag') && is_product_tag()) )) {
+            $woo_template = get_template_directory() . '/woocommerce.php';
+            if (file_exists($woo_template)) {
+                return $woo_template;
+            }
+        }
+        return $template;
+    }, 999);
+
     // Site Icon (Favicon) Support
     add_theme_support('site-icon');
 }
+
+/**
+ * Fix WooCommerce category/tag base when set to full URL (e.g. https://product-category) — breaks category pages.
+ */
+function xepmarket2_fix_woocommerce_permalink_bases() {
+    if (!function_exists('wc_get_permalink_structure') || !class_exists('WooCommerce')) {
+        return;
+    }
+    $permalinks = get_option('woocommerce_permalinks', array());
+    if (!is_array($permalinks)) {
+        return;
+    }
+    $fixed = false;
+    if (!empty($permalinks['category_base']) && (strpos($permalinks['category_base'], 'http') === 0 || strpos($permalinks['category_base'], '//') !== false)) {
+        $permalinks['category_base'] = 'product-category';
+        $fixed = true;
+    }
+    if (!empty($permalinks['tag_base']) && (strpos($permalinks['tag_base'], 'http') === 0 || strpos($permalinks['tag_base'], '//') !== false)) {
+        $permalinks['tag_base'] = 'product-tag';
+        $fixed = true;
+    }
+    if ($fixed) {
+        update_option('woocommerce_permalinks', $permalinks);
+        flush_rewrite_rules(false);
+    }
+}
+add_action('init', 'xepmarket2_fix_woocommerce_permalink_bases', 5);
+
 add_action('after_setup_theme', 'xepmarket2_setup');
 
 /**
- * Enqueue WooCommerce Gallery Scripts
+ * Fallback when no menu is assigned to Primary location. Shows Home, Shop, Swap.
  */
+function xepmarket2_menu_fallback($args)
+{
+    $args = (object) $args;
+    $menu_class = !empty($args->menu_class) ? $args->menu_class : 'menu';
+    $shop_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('shop') : home_url('/shop/');
+    $swap_url = home_url('/swap/');
+    $items = array(
+        array('title' => __('Home', 'xepmarket2'), 'url' => home_url('/')),
+        array('title' => __('Shop', 'xepmarket2'), 'url' => $shop_url),
+        array('title' => __('Swap', 'xepmarket2'), 'url' => $swap_url),
+    );
+    echo '<ul id="primary-menu" class="' . esc_attr($menu_class) . '">';
+    foreach ($items as $item) {
+        echo '<li><a href="' . esc_url($item['url']) . '">' . esc_html($item['title']) . '</a></li>';
+    }
+    echo '</ul>';
+}
 function xepmarket2_enqueue_gallery_scripts()
 {
     if (function_exists('is_product') && is_product()) {
@@ -459,27 +531,67 @@ add_filter('loop_shop_columns', function () {
  */
 add_filter('loop_shop_per_page', function ($cols) {
     if (isset($_GET['ppp'])) {
-        return intval($_GET['ppp']);
+        $ppp = intval($_GET['ppp']);
+        if ($ppp === -1) {
+            return -1; // Show all products (no pagination)
+        }
+        return min(max($ppp, 1), 200);
     }
     return 25; // Default for Alpha theme
 }, 9999);
 
 /**
+ * Shop page: Category filter bar for better customer experience
+ */
+function xepmarket2_shop_category_bar() {
+    if (!function_exists('wc_get_page_id') || !taxonomy_exists('product_cat')) {
+        return;
+    }
+    $terms = get_terms(array(
+        'taxonomy'   => 'product_cat',
+        'parent'     => 0,
+        'hide_empty' => true,
+        'orderby'    => 'name',
+        'order'      => 'ASC',
+    ));
+    if (is_wp_error($terms) || empty($terms)) {
+        return;
+    }
+    $current_id = (function_exists('is_product_category') && is_product_category()) ? get_queried_object_id() : 0;
+    $shop_url   = get_permalink(wc_get_page_id('shop'));
+    echo '<div class="xep-shop-category-bar" role="navigation" aria-label="' . esc_attr__('Product categories', 'woocommerce') . '">';
+    echo '<a href="' . esc_url($shop_url) . '" class="xep-cat-pill' . ($current_id === 0 ? ' active' : '') . '">' . esc_html__('All', 'woocommerce') . '</a>';
+    foreach ($terms as $term) {
+        $url  = get_term_link($term);
+        $active = ($current_id === (int) $term->term_id) ? ' active' : '';
+        if (is_wp_error($url)) {
+            continue;
+        }
+        echo '<a href="' . esc_url($url) . '" class="xep-cat-pill' . $active . '">' . esc_html($term->name) . '</a>';
+    }
+    echo '</div>';
+}
+
+/**
  * Display Products Per Page Selector
  */
+add_action('woocommerce_before_shop_loop', 'xepmarket2_shop_category_bar', 12);
 add_action('woocommerce_before_shop_loop', function () {
     $ppp = isset($_GET['ppp']) ? intval($_GET['ppp']) : 25;
-    $options = array(25, 50, 75, 100);
+    $options = array(25, 50, 75, 100, 200);
+    $all_value = -1; // "All" = show all
 
     echo '<div class="xep-ppp-selector">';
     echo '<span class="ppp-label">SHOW:</span>';
     foreach ($options as $opt) {
-        $active = ($ppp == $opt) ? 'active' : '';
-        // Remove paged query arg and also handle permalink pagination (/page/N/)
+        $active = ($ppp === $opt) ? 'active' : '';
         $current_url = preg_replace('/\/page\/[0-9]+\//', '/', $_SERVER['REQUEST_URI']);
         $url = add_query_arg(array('ppp' => $opt, 'paged' => 1), $current_url);
         echo '<a href="' . esc_url($url) . '" class="ppp-opt ' . $active . '">' . $opt . '</a>';
     }
+    $active_all = ($ppp === $all_value) ? 'active' : '';
+    $url_all = add_query_arg(array('ppp' => $all_value, 'paged' => 1), preg_replace('/\/page\/[0-9]+\//', '/', $_SERVER['REQUEST_URI']));
+    echo '<a href="' . esc_url($url_all) . '" class="ppp-opt ' . $active_all . '">' . esc_html__('All', 'woocommerce') . '</a>';
     echo '</div>';
 }, 25);
 
@@ -530,11 +642,6 @@ function xepmarket2_template_loop_product_thumbnail()
     $size = 'full'; // Using full size for original aspect ratio, CSS will scale it down
     echo $product ? $product->get_image($size) : '';
 }
-
-// Change number of products per page
-add_filter('loop_shop_per_page', function ($cols) {
-    return 9;
-}, 999);
 
 // Customizing WooCommerce breadcrumb
 if (get_option('xepmarket2_mod_breadcrumb_modern', '1') == '1') {
@@ -671,7 +778,7 @@ function xepmarket2_simplify_checkout_fields($fields)
                 $fields['billing'][$key]['required'] = ($is_required === '1');
             }
             $order_num = intval(get_option('xepmarket2_chk_order_' . $base_key, $field_defaults[$base_key]['order'] ?? '99'));
-            $all_fields_ordered[$key] = $order_num;
+            $all_fields_ordered[$key] = ['order' => $order_num, 'base' => $base_key];
         }
     }
 
@@ -695,7 +802,7 @@ function xepmarket2_simplify_checkout_fields($fields)
             'priority' => 25
         );
         $order_num = intval(get_option('xepmarket2_chk_order_telegram', '8'));
-        $all_fields_ordered['billing_telegram'] = $order_num;
+        $all_fields_ordered['billing_telegram'] = ['order' => $order_num, 'base' => 'telegram'];
     }
 
     // Dynamic Custom Fields
@@ -713,52 +820,56 @@ function xepmarket2_simplify_checkout_fields($fields)
                 'clear' => true,
                 'priority' => 100
             );
-            $all_fields_ordered[$field_key] = $cf_order;
+            $all_fields_ordered[$field_key] = ['order' => $cf_order, 'base' => $cf['id'], 'width' => isset($cf['width']) ? $cf['width'] : 'full'];
         }
     }
 
-    // Group fields by order number and assign priorities + CSS classes
-    $order_groups = [];
-    foreach ($all_fields_ordered as $fkey => $forder) {
-        $order_groups[$forder][] = $fkey;
+    // Build rows from order + width: 2/2 = full row, 2/1 = half (pair with next 2/1 or leave empty)
+    uasort($all_fields_ordered, function ($a, $b) {
+        return ($a['order'] - $b['order']);
+    });
+    $sorted_keys = array_keys($all_fields_ordered);
+
+    $rows = [];
+    $i = 0;
+    while ($i < count($sorted_keys)) {
+        $fkey = $sorted_keys[$i];
+        $info = $all_fields_ordered[$fkey];
+        $base = $info['base'];
+        $width = isset($info['width']) ? $info['width'] : get_option('xepmarket2_chk_width_' . $base, 'half');
+        if ($width === 'full') {
+            $rows[] = [['key' => $fkey, 'class' => 'form-row-wide']];
+            $i++;
+        } else {
+            if ($i + 1 < count($sorted_keys)) {
+                $next_key = $sorted_keys[$i + 1];
+                $next_info = $all_fields_ordered[$next_key];
+                $next_base = $next_info['base'];
+                $next_width = isset($next_info['width']) ? $next_info['width'] : get_option('xepmarket2_chk_width_' . $next_base, 'half');
+                if ($next_width === 'half') {
+                    $rows[] = [['key' => $fkey, 'class' => 'form-row-first'], ['key' => $next_key, 'class' => 'form-row-last']];
+                    $i += 2;
+                    continue;
+                }
+            }
+            $rows[] = [['key' => $fkey, 'class' => 'form-row-first']];
+            $i++;
+        }
     }
-    ksort($order_groups);
 
     $priority = 10;
     $css_order_styles = '';
-    foreach ($order_groups as $order_num => $group_keys) {
-        $count = count($group_keys);
-        $i = 0;
-        while ($i < $count) {
-            if ($i + 1 < $count) {
-                // Pair two fields side by side
-                $left_key = $group_keys[$i];
-                $right_key = $group_keys[$i + 1];
-                if (isset($fields['billing'][$left_key])) {
-                    $fields['billing'][$left_key]['priority'] = $priority;
-                    $fields['billing'][$left_key]['class'] = array('form-row-first');
-                    $css_order_styles .= '#' . $left_key . '_field{order:' . $priority . ' !important;grid-column:span 1 !important;}';
-                }
-                if (isset($fields['billing'][$right_key])) {
-                    $fields['billing'][$right_key]['priority'] = $priority + 1;
-                    $fields['billing'][$right_key]['class'] = array('form-row-last');
-                    $css_order_styles .= '#' . $right_key . '_field{order:' . ($priority + 1) . ' !important;grid-column:span 1 !important;}';
-                }
-                $priority += 2;
-                $i += 2;
-            } else {
-                // Odd one out = full width
-                $solo_key = $group_keys[$i];
-                if (isset($fields['billing'][$solo_key])) {
-                    $fields['billing'][$solo_key]['priority'] = $priority;
-                    $fields['billing'][$solo_key]['class'] = array('form-row-wide');
-                    $css_order_styles .= '#' . $solo_key . '_field{order:' . $priority . ' !important;grid-column:span 2 !important;}';
-                }
-                $priority++;
-                $i++;
-            }
+    foreach ($rows as $row) {
+        foreach ($row as $cell) {
+            $fkey = $cell['key'];
+            $cls = $cell['class'];
+            if (!isset($fields['billing'][$fkey])) continue;
+            $fields['billing'][$fkey]['priority'] = $priority;
+            $fields['billing'][$fkey]['class'] = array($cls);
+            $span = ($cls === 'form-row-wide') ? 2 : 1;
+            $css_order_styles .= '#' . $fkey . '_field{order:' . $priority . ' !important;grid-column:span ' . $span . ' !important;}';
+            $priority++;
         }
-        $priority += 2;
     }
 
     // Output CSS for grid ordering (must use wp_footer because this filter runs after wp_head)
@@ -1212,7 +1323,7 @@ function xepmarket2_settings_init()
         register_setting('xepmarket2_settings_group', 'xepmarket2_token_status_' . $i);
     }
 
-    register_setting('xepmarket2_settings_group', 'xepmarket2_admin_banner_img');
+    // Admin panel banner removed (no longer used in settings UI)
     register_setting('xepmarket2_settings_group', 'xepmarket2_banner_main');
     register_setting('xepmarket2_settings_group', 'xepmarket2_banner_discount');
     register_setting('xepmarket2_settings_group', 'xepmarket2_banner_bg');
@@ -1270,6 +1381,44 @@ function xepmarket2_settings_init()
     register_setting('xepmarket2_settings_group', 'xepmarket2_mod_sale_badges');
     register_setting('xepmarket2_settings_group', 'xepmarket2_mod_breadcrumb_modern');
 
+    // Menu Settings (web / mobile menu selection)
+    register_setting('xepmarket2_settings_group', 'xepmarket2_menu_web', array(
+        'sanitize_callback' => function ($v) {
+            if ($v === '' || $v === null) return '';
+            $id = absint($v);
+            return $id && is_nav_menu($id) ? (string) $id : '';
+        },
+    ));
+    register_setting('xepmarket2_settings_group', 'xepmarket2_menu_mobile', array(
+        'sanitize_callback' => function ($v) {
+            if ($v === '' || $v === null) return '';
+            $id = absint($v);
+            return $id && is_nav_menu($id) ? (string) $id : '';
+        },
+    ));
+
+    // Mobile bottom bar (icon nav) visibility
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_show_home');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_show_shop');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_show_cart');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_show_account');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_icon_home');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_icon_shop');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_icon_cart');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_icon_account');
+
+    // Mobile bottom bar: additional custom menu items (up to 5; count = 5 minus active defaults)
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_custom_items', array(
+        'type' => 'array',
+        'sanitize_callback' => 'xepmarket2_sanitize_mobile_nav_custom_items',
+    ));
+
+    // Mobile bottom bar: order of items (array of 5: home, shop, cart, account, custom_0..custom_4)
+    register_setting('xepmarket2_settings_group', 'xepmarket2_mobile_nav_order', array(
+        'type' => 'array',
+        'sanitize_callback' => 'xepmarket2_sanitize_mobile_nav_order',
+    ));
+
     // Checkout Customization Toggles
     $checkout_fields = ['first_name', 'last_name', 'company', 'country', 'address_1', 'address_2', 'city', 'state', 'postcode', 'phone', 'email', 'telegram'];
     foreach ($checkout_fields as $field) {
@@ -1277,6 +1426,7 @@ function xepmarket2_settings_init()
         register_setting('xepmarket2_settings_group', 'xepmarket2_chk_name_' . $field);
         register_setting('xepmarket2_settings_group', 'xepmarket2_chk_req_' . $field);
         register_setting('xepmarket2_settings_group', 'xepmarket2_chk_order_' . $field);
+        register_setting('xepmarket2_settings_group', 'xepmarket2_chk_width_' . $field);
     }
 
     // Register custom dynamic fields array (JSON string)
@@ -1284,6 +1434,54 @@ function xepmarket2_settings_init()
         'type' => 'string',
         'sanitize_callback' => 'xepmarket2_sanitize_custom_fields_json',
     ));
+
+    // Telegram Bot (theme-integrated; same options as standalone plugin)
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_enabled');
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_token', array(
+        'sanitize_callback' => function ($v) { return is_string($v) ? trim($v) : ''; }
+    ));
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_chat_id', array(
+        'sanitize_callback' => function ($v) { return is_string($v) ? trim($v) : ''; }
+    ));
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_msg_new_order');
+    register_setting('xepmarket2_settings_group', 'xep_tg_bot_msg_status_changed');
+
+    // Shipping Exclusion Settings
+    register_setting('xepmarket2_settings_group', 'xepmarket2_shipping_excluded_countries', array(
+        'type' => 'array',
+        'sanitize_callback' => function($input) {
+            return is_array($input) ? array_map('sanitize_text_field', $input) : array();
+        }
+    ));
+
+    // Shipping Rates Settings
+    register_setting('xepmarket2_settings_group', 'xepmarket2_shipping_base_cost');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_shipping_zones', array(
+        'sanitize_callback' => 'xepmarket2_sanitize_shipping_zones_json'
+    ));
+
+    // Affiliate (theme-integrated; same options as standalone plugin)
+    register_setting('xepmarket2_settings_group', 'omnixep_affiliate_rate');
+    register_setting('xepmarket2_settings_group', 'omnixep_affiliate_cookie_days');
+}
+
+function xepmarket2_sanitize_shipping_zones_json($input) {
+    if (empty($input)) return '[]';
+    $decoded = json_decode(wp_unslash($input), true);
+    if (!is_array($decoded)) return '[]';
+    
+    $clean = array();
+    foreach ($decoded as $zone) {
+        if (!isset($zone['id'])) continue;
+        $countries = isset($zone['countries']) && is_array($zone['countries']) ? array_map('sanitize_text_field', $zone['countries']) : array();
+        $clean[] = array(
+            'id' => sanitize_key($zone['id']),
+            'name' => sanitize_text_field($zone['name'] ?? ''),
+            'cost' => is_numeric($zone['cost']) ? floatval($zone['cost']) : 0,
+            'countries' => $countries
+        );
+    }
+    return wp_json_encode($clean);
 }
 
 function xepmarket2_sanitize_custom_fields_json($input)
@@ -1304,11 +1502,61 @@ function xepmarket2_sanitize_custom_fields_json($input)
             'label' => sanitize_text_field($field['label'] ?? ''),
             'required' => !empty($field['required']),
             'order' => isset($field['order']) ? intval($field['order']) : 99,
+            'width' => (isset($field['width']) && $field['width'] === 'full') ? 'full' : 'half',
         );
     }
     return wp_json_encode($clean);
 }
+
+/**
+ * Sanitize mobile bottom bar custom items. Max 5 items (bar total max 5; slots = 5 - active defaults).
+ */
+function xepmarket2_sanitize_mobile_nav_custom_items($input) {
+    if (!is_array($input)) return get_option('xepmarket2_mobile_nav_custom_items', array());
+    $out = array();
+    foreach ($input as $row) {
+        if (count($out) >= 5) break;
+        if (!is_array($row)) continue;
+        $url = isset($row['url']) ? esc_url_raw($row['url']) : '';
+        $label = isset($row['label']) ? sanitize_text_field($row['label']) : '';
+        $icon = isset($row['icon']) ? sanitize_text_field($row['icon']) : 'dashicons dashicons-admin-links';
+        $show = !empty($row['show']);
+        $out[] = array('url' => $url, 'label' => $label, 'icon' => $icon, 'show' => $show);
+    }
+    return $out;
+}
+
+/**
+ * Sanitize mobile bottom bar order. Exactly 5 slots; each value: home, shop, cart, account, custom_0..custom_4.
+ */
+function xepmarket2_sanitize_mobile_nav_order($input) {
+    $allowed = array('home', 'shop', 'cart', 'account', 'custom_0', 'custom_1', 'custom_2', 'custom_3', 'custom_4');
+    $default = array('home', 'shop', 'cart', 'account', 'custom_0');
+    if (!is_array($input)) return $default;
+    $out = array();
+    for ($i = 0; $i < 5; $i++) {
+        $v = isset($input[$i]) ? sanitize_text_field($input[$i]) : '';
+        $out[] = in_array($v, $allowed, true) ? $v : (isset($default[$i]) ? $default[$i] : 'custom_0');
+    }
+    return array_slice($out, 0, 5);
+}
+
 add_action('admin_init', 'xepmarket2_settings_init');
+
+/**
+ * AJAX: Save checkout field order (when dropping into empty slot in grid)
+ */
+function xepmarket2_ajax_save_checkout_order() {
+    check_ajax_referer('xep_admin_nonce', 'nonce');
+    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
+    $orders = isset($_POST['orders']) && is_array($_POST['orders']) ? array_map('absint', $_POST['orders']) : array();
+    $allowed = array('first_name', 'last_name', 'company', 'country', 'address_1', 'address_2', 'city', 'state', 'postcode', 'phone', 'email', 'telegram');
+    foreach ($orders as $field_id => $order) {
+        if (in_array($field_id, $allowed, true) && $order >= 1) update_option('xepmarket2_chk_order_' . $field_id, $order);
+    }
+    wp_send_json_success();
+}
+add_action('wp_ajax_xep_save_checkout_order', 'xepmarket2_ajax_save_checkout_order');
 
 function xepmarket2_get_option($key, $default = '')
 {
@@ -1320,11 +1568,7 @@ function xepmarket2_settings_page()
 {
     ?>
     <div class="xep-admin-wrap">
-        <?php if ($admin_banner = get_option('xepmarket2_admin_banner_img')): ?>
-            <div class="xep-admin-banner-area">
-                <img src="<?php echo esc_url($admin_banner); ?>" alt="Admin Banner">
-            </div>
-        <?php endif; ?>
+        <?php /* Admin panel header banner removed */ ?>
 
         <div class="xep-admin-header">
             <div class="xep-admin-title">
@@ -1346,6 +1590,12 @@ function xepmarket2_settings_page()
                     <div class="xep-nav-item active" data-tab="tab-general">
                         <i class="fas fa-cog"></i> General Settings
                     </div>
+                    <div class="xep-nav-item" data-tab="tab-logos">
+                        <i class="fas fa-id-badge"></i> Brand &amp; Logos
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-social">
+                        <i class="fas fa-share-nodes"></i> Social Media
+                    </div>
                     <div class="xep-nav-item" data-tab="tab-colors">
                         <i class="fas fa-palette"></i> Styling & Colors
                     </div>
@@ -1355,14 +1605,32 @@ function xepmarket2_settings_page()
                     <div class="xep-nav-item" data-tab="tab-sections">
                         <i class="fas fa-th-large"></i> Page Sections
                     </div>
+                    <div class="xep-nav-item" data-tab="tab-flash-deals">
+                        <i class="fas fa-bolt"></i> Flash Deals
+                    </div>
                     <div class="xep-nav-item" data-tab="tab-modules">
                         <i class="fas fa-puzzle-piece"></i> Theme Modules
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-menus">
+                        <i class="fas fa-bars"></i> Menu Settings
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-alisync">
+                        <i class="fas fa-sync-alt"></i> AliSync Helper
                     </div>
                     <div class="xep-nav-item" data-tab="tab-support">
                         <i class="fas fa-headset"></i> Support & Contact
                     </div>
+                    <div class="xep-nav-item" data-tab="tab-telegram">
+                        <i class="dashicons dashicons-format-chat"></i> Telegram Bot
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-affiliate">
+                        <i class="fas fa-handshake"></i> Affiliate
+                    </div>
                     <div class="xep-nav-item" data-tab="tab-checkout">
                         <i class="fas fa-shopping-cart"></i> Checkout Customization
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-shipping">
+                        <i class="fas fa-truck"></i> Shipping Rates & Limits
                     </div>
                     <div class="xep-nav-item" data-tab="tab-seo">
                         <i class="fas fa-search"></i> SEO & AI Settings
@@ -1467,8 +1735,8 @@ function xepmarket2_settings_page()
                             <script>
                                 function applyXepPreset(element, primary, secondary, bg, text, muted) {
                                     document.querySelector('input[name="xepmarket2_color_primary"]').value = primary;
-                                    document.querySelector('input[name="xepmarket2_color_secondary"]').value = seconda                                    ry;
-                                    document.querySelect                                or('input[name="xepmarket2_color_bg"]').value = bg;
+                                    document.querySelector('input[name="xepmarket2_color_secondary"]').value = secondary;
+                                    document.querySelector('input[name="xepmarket2_color_bg"]').value = bg;
                                     document.querySelector('input[name="xepmarket2_color_text"]').value = text;
                                     document.querySelector('input[name="xepmarket2_color_text_muted"]').value = muted;
 
@@ -1537,8 +1805,8 @@ function xepmarket2_settings_page()
                         </div>
                     </div>
 
-                    <!-- Tab: General -->
-                    <div id="tab-general" class="xep-tab-content active">
+                    <!-- Tab: Brand & Logos -->
+                    <div id="tab-logos" class="xep-tab-content">
                         <div class="xep-section-card">
                             <h3>Brand Identity & Logos</h3>
                             <div class="xep-form-group">
@@ -1553,26 +1821,6 @@ function xepmarket2_settings_page()
                                 <p class="description">Select or upload your site favicon.</p>
                             </div>
 
-                            <div class="xep-form-group">
-                                <label>Admin Panel Header Banner</label>
-                                <div style="display: flex; gap: 10px;">
-                                    <input type="text" name="xepmarket2_admin_banner_img" id="xep_admin_banner_img"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_admin_banner_img')); ?>"
-                                        style="flex: 1;" />
-                                    <button type="button" class="xep-browse-btn" data-target="xep_admin_banner_img"
-                                        style="padding: 10px 20px; font-size: 13px; width: auto; background: var(--admin-surface); border: 1px solid var(--admin-border); color: #fff; border-radius: 8px; cursor: pointer;">Browse</button>
-                                </div>
-                                <p class="description">Upload a banner image (recommended: 1200x200px) that will appear at
-                                    the top of this settings page.</p>
-                                <?php if ($admin_banner_prev = get_option('xepmarket2_admin_banner_img')): ?>
-                                    <div class="xep-image-preview"
-                                        style="margin-top: 10px; border-radius: 12px; overflow: hidden; border: 1px solid var(--admin-border); background: #000; max-width: 400px;">
-                                        <img src="<?php echo esc_url($admin_banner_prev); ?>"
-                                            style="width: 100%; display: block;" id="preview_xep_admin_banner_img" />
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-
                             <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
 
                             <div class="xep-grid-2">
@@ -1583,6 +1831,7 @@ function xepmarket2_settings_page()
                                         <label>Logo Type</label>
                                         <select name="xepmarket2_header_logo_type">
                                             <option value="text" <?php selected('text', get_option('xepmarket2_header_logo_type')); ?>>Text Only</option>
+                                            <option value="text_image" <?php selected('text_image', get_option('xepmarket2_header_logo_type')); ?>>Text &amp; Image</option>
                                             <option value="image" <?php selected('image', get_option('xepmarket2_header_logo_type')); ?>>Image Only</option>
                                         </select>
                                     </div>
@@ -1615,6 +1864,7 @@ function xepmarket2_settings_page()
                                         <label>Logo Type</label>
                                         <select name="xepmarket2_footer_logo_type">
                                             <option value="text" <?php selected('text', get_option('xepmarket2_footer_logo_type')); ?>>Text Only</option>
+                                            <option value="text_image" <?php selected('text_image', get_option('xepmarket2_footer_logo_type')); ?>>Text &amp; Image</option>
                                             <option value="image" <?php selected('image', get_option('xepmarket2_footer_logo_type')); ?>>Image Only</option>
                                         </select>
                                     </div>
@@ -1640,10 +1890,14 @@ function xepmarket2_settings_page()
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
 
-                            <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
-
-                            <h4 style="color: var(--admin-primary); margin-bottom: 20px;">Social Media Presence</h4>
+                    <!-- Tab: Social Media -->
+                    <div id="tab-social" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Social Media</h3>
+                            <p class="description" style="margin-bottom: 25px;">Configure your social links shown across the site (footer icons, contact areas, etc.).</p>
                             <div class="xep-grid-2">
                                 <div class="xep-form-group">
                                     <label><i class="fab fa-telegram-plane"></i> Telegram Channel URL</label>
@@ -1682,8 +1936,14 @@ function xepmarket2_settings_page()
                                         value="<?php echo esc_attr(get_option('xepmarket2_social_tiktok')); ?>" />
                                 </div>
                             </div>
+                        </div>
+                    </div>
 
-                            <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
+                    <!-- Tab: General -->
+                    <div id="tab-general" class="xep-tab-content active">
+                        <div class="xep-section-card">
+                            <h3>General Settings</h3>
+                            <p class="description" style="margin-bottom: 25px;">Footer badges, announcement banner, and footer text.</p>
 
                             <h4 style="color: var(--admin-primary); margin-bottom: 20px;">Payment Methods (Footer Badges)
                             </h4>
@@ -1767,6 +2027,7 @@ function xepmarket2_settings_page()
                             <h3>Main Hero Interaction</h3>
                             <div class="xep-form-group" style="display: flex; align-items: center; gap: 15px;">
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_slider_enable" value="0" />
                                     <input type="checkbox" name="xepmarket2_slider_enable" value="1" <?php checked(1, get_option('xepmarket2_slider_enable'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -1906,43 +2167,6 @@ function xepmarket2_settings_page()
                         </div>
 
                         <div class="xep-section-card">
-                            <h3>Flash Deals (Sale Products Slider)</h3>
-                            <div class="xep-form-group"
-                                style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--admin-border); padding-bottom: 20px; margin-bottom: 20px;">
-                                <div>
-                                    <div style="font-weight: 700; font-size: 16px;">Enable Flash Deals</div>
-                                    <div class="description">Show the on-sale products slider above Trending Gear.</div>
-                                </div>
-                                <label class="xep-switch">
-                                    <input type="checkbox" name="xepmarket2_flash_deals_enable" value="1" <?php checked(1, get_option('xepmarket2_flash_deals_enable', '1'), true); ?> />
-                                    <span class="xep-slider"></span>
-                                </label>
-                            </div>
-                            <div class="xep-form-group">
-                                <label>Section Title (HTML Allowed)</label>
-                                <input type="text" name="xepmarket2_flash_deals_title"
-                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_title', 'Flash <span class="logo-accent">Deals</span>')); ?>" />
-                            </div>
-                            <div class="xep-form-group">
-                                <label>Section Subtitle</label>
-                                <input type="text" name="xepmarket2_flash_deals_subtitle"
-                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_subtitle', 'Exclusive discounts on premium gear.')); ?>" />
-                            </div>
-                            <div class="xep-grid-2">
-                                <div class="xep-form-group">
-                                    <label>Total Products to Show</label>
-                                    <input type="number" name="xepmarket2_flash_deals_limit"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_limit', '12')); ?>" />
-                                </div>
-                                <div class="xep-form-group">
-                                    <label>Columns</label>
-                                    <input type="number" name="xepmarket2_flash_deals_columns"
-                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_columns', '4')); ?>" />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="xep-section-card">
                             <h3>Trending Gear (Products)</h3>
                             <div class="xep-form-group">
                                 <label>Section Title</label>
@@ -1968,6 +2192,47 @@ function xepmarket2_settings_page()
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Tab: Flash Deals -->
+                    <div id="tab-flash-deals" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Flash Deals Settings</h3>
+                            <div class="xep-form-group"
+                                style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--admin-border); padding-bottom: 20px; margin-bottom: 20px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 16px;">Enable Flash Deals</div>
+                                    <div class="description">Show the on-sale products slider above Trending Gear.</div>
+                                </div>
+                                <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_flash_deals_enable" value="0" />
+                                    <input type="checkbox" name="xepmarket2_flash_deals_enable" value="1" <?php checked(1, get_option('xepmarket2_flash_deals_enable', '1'), true); ?> />
+                                    <span class="xep-slider"></span>
+                                </label>
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Flash Deals Title (HTML Allowed)</label>
+                                <input type="text" name="xepmarket2_flash_deals_title"
+                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_title', 'Flash <span class="logo-accent">Deals</span>')); ?>" />
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Flash Deals Subtitle</label>
+                                <input type="text" name="xepmarket2_flash_deals_subtitle"
+                                    value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_subtitle', 'Exclusive discounts on premium gear.')); ?>" />
+                            </div>
+                            <div class="xep-grid-2">
+                                <div class="xep-form-group">
+                                    <label>Total Products to Show</label>
+                                    <input type="number" name="xepmarket2_flash_deals_limit"
+                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_limit', '12')); ?>" />
+                                </div>
+                                <div class="xep-form-group">
+                                    <label>Columns</label>
+                                    <input type="number" name="xepmarket2_flash_deals_columns"
+                                        value="<?php echo esc_attr(get_option('xepmarket2_flash_deals_columns', '4')); ?>" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Tab: Modules -->
                     <div id="tab-modules" class="xep-tab-content">
@@ -1984,6 +2249,7 @@ function xepmarket2_settings_page()
                                         checkout.</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_omnixep_restrict" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_omnixep_restrict" value="1" <?php checked(1, get_option('xepmarket2_mod_omnixep_restrict', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -1997,6 +2263,7 @@ function xepmarket2_settings_page()
                                         field).</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_custom_checkout" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_custom_checkout" value="1" <?php checked(1, get_option('xepmarket2_mod_custom_checkout', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2010,6 +2277,7 @@ function xepmarket2_settings_page()
                                         "Sale!".</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_sale_badges" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_sale_badges" value="1" <?php checked(1, get_option('xepmarket2_mod_sale_badges', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2022,6 +2290,7 @@ function xepmarket2_settings_page()
                                     <div class="description">Enable premium styling for WooCommerce breadcrumbs.</div>
                                 </div>
                                 <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_mod_breadcrumb_modern" value="0" />
                                     <input type="checkbox" name="xepmarket2_mod_breadcrumb_modern" value="1" <?php checked(1, get_option('xepmarket2_mod_breadcrumb_modern', '1'), true); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
@@ -2031,21 +2300,50 @@ function xepmarket2_settings_page()
                         <div class="xep-section-card" style="margin-top: 30px;">
                             <h3 style="color: var(--admin-primary);"><i class="fas fa-cubes"></i> System Ecosystem & Plugins
                             </h3>
-                            <p class="description" style="margin-bottom: 25px;">Live status of all modules integrated with
+                            <p class="description" style="margin-bottom: 15px;">Live status of all modules integrated with
                                 the XEPMARKET-ALFA premium ecosystem.</p>
+
+                            <div class="xep-form-group" id="xep-install-all-modules-row"
+                                style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; background: linear-gradient(135deg, rgba(0, 242, 255, 0.08), rgba(112, 0, 255, 0.08)); padding: 18px 20px; border-radius: 12px; border: 1px solid rgba(0, 242, 255, 0.25); margin-bottom: 25px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                        <i class="fas fa-download" style="color: var(--admin-primary);"></i>
+                                        Install all required modules
+                                    </div>
+                                    <div class="description" style="margin-top: 4px;">Download all plugins from <code>github.com/PlanC90/plugins</code> and install them into <code>wp-content/plugins</code>. Existing plugins will be updated.</div>
+                                </div>
+                                <button type="button" id="xep-install-all-modules-btn" class="xep-save-btn"
+                                    data-nonce="<?php echo esc_attr(wp_create_nonce(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION)); ?>"
+                                    style="padding: 10px 22px !important; font-size: 13px !important; background: linear-gradient(135deg, #238636, #2ea043) !important; border: none !important; color: #fff !important; border-radius: 10px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; gap: 8px !important;">
+                                    <i class="fas fa-download"></i> <span class="btn-text">Install all required modules</span>
+                                </button>
+                            </div>
+
+                            <div class="xep-form-group" id="xep-github-sync-row"
+                                style="display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; background: linear-gradient(135deg, rgba(0, 242, 255, 0.06), rgba(112, 0, 255, 0.06)); padding: 18px 20px; border-radius: 12px; border: 1px solid rgba(0, 242, 255, 0.2); margin-bottom: 25px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                        <i class="fab fa-github" style="color: var(--admin-primary);"></i>
+                                        Install / Update from GitHub
+                                    </div>
+                                    <div class="description" style="margin-top: 4px;">Download all plugins from the official repo and copy them into <code>wp-content/plugins</code>. Existing folders are updated.</div>
+                                </div>
+                                <button type="button" id="xep-github-sync-btn" class="xep-save-btn"
+                                    data-nonce="<?php echo esc_attr(wp_create_nonce(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION)); ?>"
+                                    style="padding: 10px 22px !important; font-size: 13px !important; background: linear-gradient(135deg, #238636, #2ea043) !important; border: none !important; color: #fff !important; border-radius: 10px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; gap: 8px !important;">
+                                    <i class="fab fa-github"></i> <span class="btn-text">Sync from GitHub</span>
+                                </button>
+                            </div>
 
                             <?php
                             $required_plugins = [
                                 ['name' => 'WooCommerce', 'slug' => 'woocommerce', 'path' => 'woocommerce/woocommerce.php', 'required' => true, 'icon' => 'fa-shopping-cart'],
                                 ['name' => 'OmniXEP Gateway', 'slug' => 'omnixep-woocommerce', 'path' => 'omnixep-woocommerce/omnixep-woocommerce.php', 'required' => true, 'icon' => 'fa-wallet'],
-                                ['name' => 'XEP Market Affiliate', 'slug' => 'omnixep-affiliate', 'path' => 'omnixep-affiliate/omnixep-affiliate.php', 'required' => false, 'icon' => 'fa-handshake'],
-                                ['name' => 'XEP Market Telegram Bot', 'slug' => 'xepmarket-telegram-bot', 'path' => 'xepmarket-telegram-bot/xepmarket-telegram-bot.php', 'required' => false, 'icon' => 'fa-robot'],
                                 ['name' => 'AliSync Helper', 'slug' => 'ali-sync-helper', 'required' => false, 'icon' => 'fa-sync-alt', 'type' => 'core'],
                                 ['name' => 'AliDropship', 'slug' => 'woo-alidropship', 'path' => 'woo-alidropship/woo-alidropship.php', 'required' => false, 'icon' => 'fa-ship'],
                                 ['name' => 'Product Variations Swatches', 'slug' => 'product-variations-swatches-for-woocommerce', 'path' => 'product-variations-swatches-for-woocommerce/product-variations-swatches-for-woocommerce.php', 'required' => false, 'icon' => 'fa-palette'],
                                 ['name' => 'Additional Variation Gallery', 'slug' => 'vargal-additional-variation-gallery-for-woo', 'path' => 'vargal-additional-variation-gallery-for-woo/vargal-additional-variation-gallery-for-woo.php', 'required' => false, 'icon' => 'fa-images'],
                                 ['name' => 'Orders Tracking', 'slug' => 'woo-orders-tracking', 'path' => 'woo-orders-tracking/woo-orders-tracking.php', 'required' => false, 'icon' => 'fa-truck-fast'],
-                                ['name' => 'WP Mail SMTP', 'slug' => 'wp-mail-smtp', 'path' => 'wp-mail-smtp/wp-mail-smtp.php', 'required' => false, 'icon' => 'fa-paper-plane'],
                             ];
 
                             if (!function_exists('is_plugin_active')) {
@@ -2055,6 +2353,7 @@ function xepmarket2_settings_page()
                             $all_plugins = get_plugins();
 
                             foreach ($required_plugins as $plug):
+                                $update_available = false;
                                 if (isset($plug['type']) && $plug['type'] === 'core') {
                                     $is_installed = true;
                                     $is_active = true;
@@ -2082,6 +2381,13 @@ function xepmarket2_settings_page()
                                     if (!$is_installed && file_exists(WP_PLUGIN_DIR . '/' . $plug['slug'])) {
                                         $is_installed = true;
                                     }
+
+                                    // Güncelleme kontrolü: kurulu sürüm < temadaki beklenen sürüm
+                                    $update_available = false;
+                                    $expected_version = function_exists('xepmarket2_get_plugin_expected_version') ? xepmarket2_get_plugin_expected_version($plug['slug']) : null;
+                                    if ($is_installed && $expected_version && !empty($plugin_path) && isset($all_plugins[$plugin_path]['Version'])) {
+                                        $update_available = version_compare($all_plugins[$plugin_path]['Version'], $expected_version, '<');
+                                    }
                                 }
                                 ?>
                                 <div class="xep-form-group"
@@ -2106,7 +2412,9 @@ function xepmarket2_settings_page()
                                             </div>
                                             <div class="status-indicator"
                                                 style="margin-top: 4px; font-size: 12px; opacity: 0.8;">
-                                                <?php if ($is_active): ?>
+                                                <?php if ($update_available): ?>
+                                                    <span style="color: #ff9f0a;"><i class="fas fa-arrow-circle-up"></i> Update available (<?php echo esc_html($expected_version); ?>)</span>
+                                                <?php elseif ($is_active): ?>
                                                     <span style="color: #32d74b;"><i class="fas fa-circle-check"></i>
                                                         Activated</span>
                                                 <?php elseif ($is_installed): ?>
@@ -2119,7 +2427,11 @@ function xepmarket2_settings_page()
                                     </div>
 
                                     <div class="plugin-action">
-                                        <?php if (isset($plug['type']) && $plug['type'] === 'core'): ?>
+                                        <?php if ($update_available): ?>
+                                            <a href="<?php echo esc_url(admin_url('themes.php?page=tgmpa-install-plugins')); ?>"
+                                                class="xep-save-btn"
+                                                style="padding: 6px 15px !important; font-size: 11px !important; width: auto !important; background: linear-gradient(135deg, #238636, #2ea043) !important; box-shadow: 0 4px 10px rgba(35, 134, 54, 0.3) !important;">UPDATE</a>
+                                        <?php elseif (isset($plug['type']) && $plug['type'] === 'core'): ?>
                                             <a href="<?php echo admin_url('admin.php?page=ali-sync-helper'); ?>"
                                                 class="xep-save-btn"
                                                 style="padding: 6px 15px !important; font-size: 11px !important; width: auto !important; background: linear-gradient(135deg, #6366f1, #a855f7) !important; box-shadow: 0 4px 10px rgba(99, 102, 241, 0.2) !important;">DASHBOARD</a>
@@ -2141,263 +2453,906 @@ function xepmarket2_settings_page()
                         </div>
                     </div>
 
+                    <!-- Tab: Menu Settings -->
+                    <div id="tab-menus" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Web &amp; Mobile Menus</h3>
+                            <p class="description" style="margin-bottom: 25px;">Choose which menu appears in the desktop header and in the mobile drawer. Create and edit menus under <a href="<?php echo esc_url(admin_url('nav-menus.php')); ?>">Appearance &rarr; Menus</a>. Leave "Primary (default)" to use the same menu everywhere.</p>
+                            <?php
+                            $menus = wp_get_nav_menus();
+                            $current_web = get_option('xepmarket2_menu_web', '');
+                            $current_mobile = get_option('xepmarket2_menu_mobile', '');
+                            ?>
+                            <div class="xep-form-group" style="margin-bottom: 25px;">
+                                <label for="xepmarket2_menu_web" style="display: block; font-weight: 700; margin-bottom: 8px;">Web (desktop) menu</label>
+                                <select name="xepmarket2_menu_web" id="xepmarket2_menu_web" style="min-width: 280px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--admin-border); background: var(--admin-bg); color: var(--admin-text);">
+                                    <option value="">Primary (default)</option>
+                                    <?php foreach ($menus as $menu): ?>
+                                        <option value="<?php echo esc_attr($menu->term_id); ?>" <?php selected($current_web, (string) $menu->term_id); ?>><?php echo esc_html($menu->name); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <p class="description" style="margin-top: 6px;">This menu appears in the desktop header.</p>
+                            </div>
+                            <div class="xep-form-group">
+                                <label for="xepmarket2_menu_mobile" style="display: block; font-weight: 700; margin-bottom: 8px;">Mobile menu</label>
+                                <select name="xepmarket2_menu_mobile" id="xepmarket2_menu_mobile" style="min-width: 280px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--admin-border); background: var(--admin-bg); color: var(--admin-text);">
+                                    <option value="">Primary (default)</option>
+                                    <?php foreach ($menus as $menu): ?>
+                                        <option value="<?php echo esc_attr($menu->term_id); ?>" <?php selected($current_mobile, (string) $menu->term_id); ?>><?php echo esc_html($menu->name); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <p class="description" style="margin-top: 6px;">This menu appears in the panel that opens when the hamburger icon is tapped on mobile.</p>
+                            </div>
+                            <p style="margin-top: 20px;"><a href="<?php echo esc_url(admin_url('nav-menus.php')); ?>" class="xep-save-btn" style="display: inline-flex; align-items: center; gap: 8px;"><i class="fas fa-edit"></i> Edit menus</a></p>
+                        </div>
+
+                        <div class="xep-section-card" style="margin-top: 30px;">
+                            <h3>Mobile bottom bar (icon nav)</h3>
+                            <p class="description" style="margin-bottom: 25px;">Show or hide each icon in the fixed bottom navigation bar on mobile. You can choose which icon to display for each item. Maximum 5 items; turn off default items to free slots for additional custom links.</p>
+                            <?php
+                            $icon_opts_home   = array('' => 'Default (home)', 'dashicons dashicons-admin-home' => 'Dashicons: Home', 'fa-solid fa-house' => 'FA: House', 'fa-solid fa-home' => 'FA: Home');
+                            $icon_opts_shop  = array('' => 'Default (store)', 'dashicons dashicons-store' => 'Dashicons: Store', 'fa-solid fa-store' => 'FA: Store', 'fa-solid fa-bag-shopping' => 'FA: Bag');
+                            $icon_opts_cart  = array('' => 'Default (cart)', 'dashicons dashicons-cart' => 'Dashicons: Cart', 'fa-solid fa-cart-shopping' => 'FA: Cart', 'fa-solid fa-basket-shopping' => 'FA: Basket');
+                            $icon_opts_account = array('' => 'Default (user)', 'dashicons dashicons-admin-users' => 'Dashicons: User', 'fa-solid fa-user' => 'FA: User', 'fa-solid fa-user-circle' => 'FA: User circle');
+                            $icon_defaults = array('home' => 'dashicons dashicons-admin-home', 'shop' => 'dashicons dashicons-store', 'cart' => 'dashicons dashicons-cart', 'account' => 'dashicons dashicons-admin-users');
+                            $icon_opts_custom = array('dashicons dashicons-admin-links' => 'Link', 'fa-solid fa-right-left' => 'Swap', 'fa-solid fa-arrows-rotate' => 'Sync', 'fa-solid fa-link' => 'FA: Link', 'fa-solid fa-star' => 'FA: Star', 'fa-solid fa-heart' => 'FA: Heart', 'fa-solid fa-phone' => 'FA: Phone', 'fa-solid fa-envelope' => 'FA: Envelope');
+                            $active_defaults = (get_option('xepmarket2_mobile_nav_show_home', '1') ? 1 : 0) + (get_option('xepmarket2_mobile_nav_show_shop', '1') ? 1 : 0) + (get_option('xepmarket2_mobile_nav_show_cart', '1') ? 1 : 0) + (get_option('xepmarket2_mobile_nav_show_account', '1') ? 1 : 0);
+                            $custom_slots = max(0, 5 - $active_defaults);
+                            $custom_items = get_option('xepmarket2_mobile_nav_custom_items', array());
+                            $custom_items = is_array($custom_items) ? array_slice($custom_items, 0, 5) : array();
+                            while (count($custom_items) < 5) { $custom_items[] = array('url' => '', 'label' => '', 'icon' => 'dashicons dashicons-admin-links', 'show' => false); }
+                            $nav_order = get_option('xepmarket2_mobile_nav_order', array('home', 'shop', 'cart', 'account', 'custom_0'));
+                            if (!is_array($nav_order) || count($nav_order) !== 5) { $nav_order = array('home', 'shop', 'cart', 'account', 'custom_0'); }
+                            $order_options = array('home' => 'Home', 'shop' => 'Shop', 'cart' => 'Cart', 'account' => 'Account', 'custom_0' => 'Custom 1', 'custom_1' => 'Custom 2', 'custom_2' => 'Custom 3', 'custom_3' => 'Custom 4', 'custom_4' => 'Custom 5');
+                            ?>
+                            <style>
+                            .xep-icon-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+                            .xep-icon-opt { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--admin-border); background: var(--admin-bg); border-radius: 10px; cursor: pointer; font-size: 18px; color: var(--admin-text); transition: all 0.2s; }
+                            .xep-icon-opt:hover { border-color: var(--admin-primary); background: rgba(0,242,255,0.1); color: var(--admin-primary); }
+                            .xep-icon-opt.selected { border-color: var(--admin-primary); border-width: 3px; background: rgba(0,242,255,0.25); color: var(--admin-primary); box-shadow: 0 0 14px rgba(0,242,255,0.4); outline: 2px solid rgba(0,242,255,0.3); outline-offset: 2px; }
+                            .xep-icon-opt i { font-size: 20px; }
+                            </style>
+                            <div class="xep-form-group" style="border: 1px solid var(--admin-primary); border-radius: 12px; padding: 16px; margin-bottom: 20px; background: rgba(0,242,255,0.06);">
+                                <h4 style="margin: 0 0 12px 0; font-size: 14px;">Order of items in the bar (left to right)</h4>
+                                <p class="description" style="margin-bottom: 14px;">Set the order of the 5 slots. Only active items (toggles On) will appear.</p>
+                                <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+                                    <?php for ($pos = 0; $pos < 5; $pos++): $cur = isset($nav_order[$pos]) ? $nav_order[$pos] : ($pos < 4 ? array('home','shop','cart','account')[$pos] : 'custom_0'); ?>
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <span style="font-size: 12px; opacity: 0.8;"><?php echo $pos + 1; ?>.</span>
+                                        <select name="xepmarket2_mobile_nav_order[<?php echo $pos; ?>]" style="min-width: 110px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--admin-border); background: var(--admin-bg); color: var(--admin-text);">
+                                            <?php foreach ($order_options as $val => $lbl): ?><option value="<?php echo esc_attr($val); ?>" <?php selected($cur, $val); ?>><?php echo esc_html($lbl); ?></option><?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <?php endfor; ?>
+                                </div>
+                            </div>
+                            <div class="xep-form-group" style="border-bottom: 1px solid var(--admin-border); padding-bottom: 16px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                                    <div><span style="font-weight: 700;">Home</span><p class="description" style="margin: 4px 0 0 0;">Link to the homepage.</p></div>
+                                    <label class="xep-switch"><input type="checkbox" name="xepmarket2_mobile_nav_show_home" value="1" <?php checked(1, get_option('xepmarket2_mobile_nav_show_home', '1'), true); ?> /><span class="xep-slider"></span></label>
+                                </div>
+                                <div style="margin-top: 12px;"><span style="font-size: 12px; opacity: 0.9;">Icon</span>
+                                <select name="xepmarket2_mobile_nav_icon_home" id="xepmarket2_mobile_nav_icon_home" style="display:none;">
+                                    <?php foreach ($icon_opts_home as $val => $label): ?><option value="<?php echo esc_attr($val); ?>" <?php selected(get_option('xepmarket2_mobile_nav_icon_home', ''), $val); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?>
+                                </select>
+                                <div class="xep-icon-picker" data-for="xepmarket2_mobile_nav_icon_home">
+                                    <?php foreach ($icon_opts_home as $val => $label): $ic = $val !== '' ? $val : $icon_defaults['home']; ?>
+                                    <button type="button" class="xep-icon-opt" data-value="<?php echo esc_attr($val); ?>" title="<?php echo esc_attr($label); ?>"><i class="<?php echo esc_attr($ic); ?>"></i></button>
+                                    <?php endforeach; ?>
+                                </div></div>
+                            </div>
+                            <div class="xep-form-group" style="border-bottom: 1px solid var(--admin-border); padding-bottom: 16px; margin-top: 16px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                                    <div><span style="font-weight: 700;">Shop</span><p class="description" style="margin: 4px 0 0 0;">Link to the shop page.</p></div>
+                                    <label class="xep-switch"><input type="checkbox" name="xepmarket2_mobile_nav_show_shop" value="1" <?php checked(1, get_option('xepmarket2_mobile_nav_show_shop', '1'), true); ?> /><span class="xep-slider"></span></label>
+                                </div>
+                                <div style="margin-top: 12px;"><span style="font-size: 12px; opacity: 0.9;">Icon</span>
+                                <select name="xepmarket2_mobile_nav_icon_shop" id="xepmarket2_mobile_nav_icon_shop" style="display:none;">
+                                    <?php foreach ($icon_opts_shop as $val => $label): ?><option value="<?php echo esc_attr($val); ?>" <?php selected(get_option('xepmarket2_mobile_nav_icon_shop', ''), $val); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?>
+                                </select>
+                                <div class="xep-icon-picker" data-for="xepmarket2_mobile_nav_icon_shop">
+                                    <?php foreach ($icon_opts_shop as $val => $label): $ic = $val !== '' ? $val : $icon_defaults['shop']; ?>
+                                    <button type="button" class="xep-icon-opt" data-value="<?php echo esc_attr($val); ?>" title="<?php echo esc_attr($label); ?>"><i class="<?php echo esc_attr($ic); ?>"></i></button>
+                                    <?php endforeach; ?>
+                                </div></div>
+                            </div>
+                            <div class="xep-form-group" style="border-bottom: 1px solid var(--admin-border); padding-bottom: 16px; margin-top: 16px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                                    <div><span style="font-weight: 700;">Cart</span><p class="description" style="margin: 4px 0 0 0;">Link to the cart (with count badge).</p></div>
+                                    <label class="xep-switch"><input type="checkbox" name="xepmarket2_mobile_nav_show_cart" value="1" <?php checked(1, get_option('xepmarket2_mobile_nav_show_cart', '1'), true); ?> /><span class="xep-slider"></span></label>
+                                </div>
+                                <div style="margin-top: 12px;"><span style="font-size: 12px; opacity: 0.9;">Icon</span>
+                                <select name="xepmarket2_mobile_nav_icon_cart" id="xepmarket2_mobile_nav_icon_cart" style="display:none;">
+                                    <?php foreach ($icon_opts_cart as $val => $label): ?><option value="<?php echo esc_attr($val); ?>" <?php selected(get_option('xepmarket2_mobile_nav_icon_cart', ''), $val); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?>
+                                </select>
+                                <div class="xep-icon-picker" data-for="xepmarket2_mobile_nav_icon_cart">
+                                    <?php foreach ($icon_opts_cart as $val => $label): $ic = $val !== '' ? $val : $icon_defaults['cart']; ?>
+                                    <button type="button" class="xep-icon-opt" data-value="<?php echo esc_attr($val); ?>" title="<?php echo esc_attr($label); ?>"><i class="<?php echo esc_attr($ic); ?>"></i></button>
+                                    <?php endforeach; ?>
+                                </div></div>
+                            </div>
+                            <div class="xep-form-group" style="padding-bottom: 0; margin-top: 16px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                                    <div><span style="font-weight: 700;">Account</span><p class="description" style="margin: 4px 0 0 0;">Link to My Account.</p></div>
+                                    <label class="xep-switch"><input type="checkbox" name="xepmarket2_mobile_nav_show_account" value="1" <?php checked(1, get_option('xepmarket2_mobile_nav_show_account', '1'), true); ?> /><span class="xep-slider"></span></label>
+                                </div>
+                                <div style="margin-top: 12px;"><span style="font-size: 12px; opacity: 0.9;">Icon</span>
+                                <select name="xepmarket2_mobile_nav_icon_account" id="xepmarket2_mobile_nav_icon_account" style="display:none;">
+                                    <?php foreach ($icon_opts_account as $val => $label): ?><option value="<?php echo esc_attr($val); ?>" <?php selected(get_option('xepmarket2_mobile_nav_icon_account', ''), $val); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?>
+                                </select>
+                                <div class="xep-icon-picker" data-for="xepmarket2_mobile_nav_icon_account">
+                                    <?php foreach ($icon_opts_account as $val => $label): $ic = $val !== '' ? $val : $icon_defaults['account']; ?>
+                                    <button type="button" class="xep-icon-opt" data-value="<?php echo esc_attr($val); ?>" title="<?php echo esc_attr($label); ?>"><i class="<?php echo esc_attr($ic); ?>"></i></button>
+                                    <?php endforeach; ?>
+                                </div></div>
+                            </div>
+
+                            <p class="description" style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--admin-border);"><?php if ($custom_slots > 0): ?><strong>Additional menu items (<?php echo $custom_slots; ?> slot<?php echo $custom_slots !== 1 ? 's' : ''; ?>)</strong> — Turn off default icons above to free slots. For each: switch <strong>On</strong>, set <strong>URL</strong> or select a page, choose icon, then <strong>Save Changes</strong>. Assign order above.<?php else: ?>Turn off one or more default icons (Home, Shop, Cart, Account) above and save to free slots for custom links.<?php endif; ?></p>
+                            <?php for ($ci = 0; $ci < $custom_slots; $ci++): $c = isset($custom_items[$ci]) ? $custom_items[$ci] : array('url'=>'','label'=>'','icon'=>'dashicons dashicons-admin-links','show'=>false); ?>
+                            <div class="xep-form-group xep-custom-nav-item" style="border: 1px solid var(--admin-border); border-radius: 12px; padding: 14px; margin-top: 14px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 10px;">
+                                    <span style="font-weight: 700;">Custom item <?php echo $ci + 1; ?></span>
+                                    <label class="xep-switch"><input type="checkbox" name="xepmarket2_mobile_nav_custom_items[<?php echo $ci; ?>][show]" value="1" <?php checked(!empty($c['show'])); ?> /><span class="xep-slider"></span></label>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                    <div><label style="font-size: 12px; opacity: 0.9;">Label</label><input type="text" id="xep_custom_nav_label_<?php echo $ci; ?>" name="xepmarket2_mobile_nav_custom_items[<?php echo $ci; ?>][label]" value="<?php echo esc_attr(isset($c['label']) ? $c['label'] : ''); ?>" placeholder="e.g. Contact" style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--admin-border); background: var(--admin-bg); color: var(--admin-text); margin-top: 4px;" /></div>
+                                    <div><label style="font-size: 12px; opacity: 0.9;">URL</label><input type="url" id="xep_custom_nav_url_<?php echo $ci; ?>" name="xepmarket2_mobile_nav_custom_items[<?php echo $ci; ?>][url]" value="<?php echo esc_attr(isset($c['url']) ? $c['url'] : ''); ?>" placeholder="https://..." style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--admin-border); background: var(--admin-bg); color: var(--admin-text); margin-top: 4px;" /></div>
+                                </div>
+                                <div style="margin-top: 12px;">
+                                    <label style="font-size: 12px; opacity: 0.9;">Or select a page</label>
+                                    <select id="xep_custom_nav_page_<?php echo $ci; ?>" class="xep-page-select" data-url-id="xep_custom_nav_url_<?php echo $ci; ?>" data-label-id="xep_custom_nav_label_<?php echo $ci; ?>" data-icon-picker-for="xep_nav_custom_icon_<?php echo $ci; ?>" style="width: 100%; max-width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--admin-border); background: var(--admin-bg); color: var(--admin-text); margin-top: 4px;">
+                                        <option value="" data-label="" <?php selected( empty($c['url']), true ); ?>>— Select a page —</option>
+                                        <?php
+                                        $nav_pages = get_pages(array('number' => 300, 'post_status' => 'publish', 'sort_column' => 'menu_order,post_title'));
+                                        $saved_url = isset($c['url']) ? trim($c['url']) : '';
+                                        foreach ($nav_pages as $p):
+                                            $plink = get_permalink($p->ID);
+                                            $url_match = $saved_url !== '' && rtrim($saved_url, '/') === rtrim($plink, '/');
+                                        ?><option value="<?php echo esc_attr($plink); ?>" data-label="<?php echo esc_attr($p->post_title); ?>" <?php selected( $url_match, true ); ?>><?php echo esc_html($p->post_title); ?></option><?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div style="margin-top: 12px;"><span style="font-size: 12px; opacity: 0.9;">Icon</span>
+                                <select name="xepmarket2_mobile_nav_custom_items[<?php echo $ci; ?>][icon]" id="xep_nav_custom_icon_<?php echo $ci; ?>" style="display:none;">
+                                    <?php foreach ($icon_opts_custom as $val => $label): ?><option value="<?php echo esc_attr($val); ?>" <?php selected(isset($c['icon']) ? $c['icon'] : 'dashicons dashicons-admin-links', $val); ?>><?php echo esc_html($label); ?></option><?php endforeach; ?>
+                                </select>
+                                <div class="xep-icon-picker" data-for="xep_nav_custom_icon_<?php echo $ci; ?>">
+                                    <?php foreach ($icon_opts_custom as $val => $label): ?>
+                                    <button type="button" class="xep-icon-opt" data-value="<?php echo esc_attr($val); ?>" title="<?php echo esc_attr($label); ?>"><i class="<?php echo esc_attr($val); ?>"></i></button>
+                                    <?php endforeach; ?>
+                                </div></div>
+                            </div>
+                            <?php endfor; ?>
+
+                            <script>
+                            (function(){
+                                function initIconPickers() {
+                                    document.querySelectorAll('.xep-icon-picker').forEach(function(picker){
+                                        var sel = document.getElementById(picker.getAttribute('data-for'));
+                                        if (!sel) return;
+                                        var opts = picker.querySelectorAll('.xep-icon-opt');
+                                        opts.forEach(function(btn){
+                                            btn.addEventListener('click', function(){
+                                                sel.value = btn.getAttribute('data-value');
+                                                opts.forEach(function(o){ o.classList.remove('selected'); });
+                                                btn.classList.add('selected');
+                                            });
+                                        });
+                                        var selVal = (sel.value || '').trim();
+                                        opts.forEach(function(btn){
+                                            var v = (btn.getAttribute('data-value') || '').trim();
+                                            if (v === selVal) btn.classList.add('selected');
+                                            else btn.classList.remove('selected');
+                                        });
+                                    });
+                                }
+                                function initPageSelects() {
+                                    document.querySelectorAll('.xep-page-select').forEach(function(sel){
+                                        sel.addEventListener('change', function(){
+                                            var urlId = this.getAttribute('data-url-id');
+                                            var labelId = this.getAttribute('data-label-id');
+                                            var opt = this.options[this.selectedIndex];
+                                            if (opt && urlId && labelId) {
+                                                var u = document.getElementById(urlId);
+                                                var l = document.getElementById(labelId);
+                                                if (u) u.value = opt.value || '';
+                                                if (l && opt.getAttribute('data-label')) l.value = opt.getAttribute('data-label');
+                                                var label = (opt.getAttribute('data-label') || '').toLowerCase();
+                                                if (label.indexOf('swap') !== -1) {
+                                                    var iconSelectId = this.getAttribute('data-icon-picker-for');
+                                                    if (iconSelectId) {
+                                                        var iconSel = document.getElementById(iconSelectId);
+                                                        var swapVal = 'fa-solid fa-right-left';
+                                                        if (iconSel) {
+                                                            iconSel.value = swapVal;
+                                                            var picker = document.querySelector('.xep-icon-picker[data-for="' + iconSelectId + '"]');
+                                                            if (picker) {
+                                                                picker.querySelectorAll('.xep-icon-opt').forEach(function(btn){ btn.classList.remove('selected'); });
+                                                                var swapBtn = picker.querySelector('.xep-icon-opt[data-value="' + swapVal + '"]');
+                                                                if (swapBtn) swapBtn.classList.add('selected');
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    });
+                                }
+                                if (document.readyState === 'loading') {
+                                    document.addEventListener('DOMContentLoaded', function(){ initIconPickers(); initPageSelects(); });
+                                } else {
+                                    initIconPickers();
+                                    initPageSelects();
+                                }
+                            })();
+                            </script>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Shipping Limits -->
+                    <div id="tab-shipping" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Shipping Exclusion Limits</h3>
+                            <p class="description" style="margin-bottom: 25px;">Select the countries you do not want to ship to. Selected countries will be removed from the checkout process, preventing users from receiving products there.</p>
+
+                            <div class="xep-shipping-exclusion-ui">
+                                <?php
+                                $excluded_countries = get_option('xepmarket2_shipping_excluded_countries');
+                                if (!is_array($excluded_countries)) $excluded_countries = array();
+                                
+                                $all_countries = array();
+                                if (class_exists('WooCommerce')) {
+                                    $all_countries = WC()->countries->get_countries();
+                                }
+                                ?>
+                                
+                                <select name="xepmarket2_shipping_excluded_countries[]" id="xep_hidden_excluded_countries" multiple style="display:none;">
+                                    <?php
+                                    // Populate hidden select with saved options so forms sumbit correctly
+                                    foreach ($excluded_countries as $code) {
+                                        echo '<option value="' . esc_attr($code) . '" selected="selected">' . esc_html($code) . '</option>';
+                                    }
+                                    ?>
+                                </select>
+
+                                <div style="display: flex; gap: 20px; align-items: stretch;">
+                                    <!-- Available Countries List -->
+                                    <div style="flex: 1; display:flex; flex-direction: column;">
+                                        <label style="font-weight: 600; margin-bottom: 10px; display: block; color: var(--admin-text);">Available Countries</label>
+                                        <div style="margin-bottom: 10px;">
+                                            <input type="text" id="xep_search_available" placeholder="Search countries..." style="width: 100%; border: 1px solid var(--admin-border); background: var(--admin-surface); color: var(--admin-text); padding: 8px 12px; border-radius: 6px;" />
+                                        </div>
+                                        <select id="xep_available_list" multiple style="width: 100%; height: 350px; padding: 10px; border: 1px solid var(--admin-border); border-radius: 8px; background: rgba(0,0,0,0.1); color: var(--admin-text); font-family: inherit; font-size: 14px;">
+                                            <?php
+                                            if (!empty($all_countries)) {
+                                                foreach ($all_countries as $code => $name) {
+                                                    if (!in_array($code, $excluded_countries)) {
+                                                        echo '<option value="' . esc_attr($code) . '">' . esc_html($name) . ' (' . esc_html($code) . ')</option>';
+                                                    }
+                                                }
+                                            } else {
+                                                echo '<option disabled>WooCommerce is not active.</option>';
+                                            }
+                                            ?>
+                                        </select>
+                                        <p class="description" style="margin-top: 10px; font-size: 12px;">Select countries to ban and click 'Add >'</p>
+                                    </div>
+
+                                    <!-- Action Buttons -->
+                                    <div style="display: flex; flex-direction: column; justify-content: center; gap: 15px;">
+                                        <button type="button" id="xep_btn_add_country" class="xep-save-btn" style="padding: 10px; min-width: 40px;" title="Add to Excluded">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </button>
+                                        <button type="button" id="xep_btn_remove_country" style="padding: 10px; min-width: 40px; background: var(--admin-border); border: none; border-radius: 6px; color: #fff; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'" title="Remove from Excluded">
+                                            <i class="fas fa-chevron-left"></i>
+                                        </button>
+                                    </div>
+
+                                    <!-- Excluded Countries List -->
+                                    <div style="flex: 1; display:flex; flex-direction: column;">
+                                        <label style="font-weight: 600; margin-bottom: 10px; display: block; color: var(--admin-primary);">Excluded Countries (Banned)</label>
+                                        <div style="margin-bottom: 10px;">
+                                            <input type="text" id="xep_search_excluded" placeholder="Search excluded..." style="width: 100%; border: 1px solid var(--admin-border); background: var(--admin-surface); color: var(--admin-text); padding: 8px 12px; border-radius: 6px;" />
+                                        </div>
+                                        <select id="xep_excluded_list" multiple style="width: 100%; height: 350px; padding: 10px; border: 1px solid var(--admin-primary); box-shadow: 0 0 10px rgba(0, 242, 255, 0.1); border-radius: 8px; background: rgba(0,0,0,0.1); color: var(--admin-text); font-family: inherit; font-size: 14px;">
+                                            <?php
+                                            if (!empty($all_countries)) {
+                                                foreach ($all_countries as $code => $name) {
+                                                    if (in_array($code, $excluded_countries)) {
+                                                        echo '<option value="' . esc_attr($code) . '">' . esc_html($name) . ' (' . esc_html($code) . ')</option>';
+                                                    }
+                                                }
+                                            }
+                                            ?>
+                                        </select>
+                                        <p class="description" style="margin-top: 10px; font-size: 12px;">Shipping is DISABELD for these countries.</p>
+                                    </div>
+                                </div>
+                                
+                                <script>
+                                (function() {
+                                    const availList = document.getElementById('xep_available_list');
+                                    const exclList = document.getElementById('xep_excluded_list');
+                                    const hiddenSelect = document.getElementById('xep_hidden_excluded_countries');
+                                    const btnAdd = document.getElementById('xep_btn_add_country');
+                                    const btnRemove = document.getElementById('xep_btn_remove_country');
+                                    
+                                    function updateHiddenSelect() {
+                                        hiddenSelect.innerHTML = '';
+                                        Array.from(exclList.options).forEach(opt => {
+                                            if(!opt.disabled) {
+                                                const newOpt = document.createElement('option');
+                                                newOpt.value = opt.value;
+                                                newOpt.selected = true;
+                                                hiddenSelect.appendChild(newOpt);
+                                            }
+                                        });
+                                    }
+
+                                    function moveOptions(source, target) {
+                                        const selectedOptions = Array.from(source.selectedOptions);
+                                        if (selectedOptions.length === 0) return;
+                                        
+                                        selectedOptions.forEach(opt => {
+                                            if(!opt.disabled) {
+                                                const newOpt = opt.cloneNode(true);
+                                                newOpt.selected = false;
+                                                target.appendChild(newOpt);
+                                                opt.remove();
+                                            }
+                                        });
+                                        
+                                        // Sort alphabetically
+                                        const options = Array.from(target.options);
+                                        options.sort((a, b) => a.text.localeCompare(b.text));
+                                        target.innerHTML = '';
+                                        options.forEach(opt => target.appendChild(opt));
+
+                                        updateHiddenSelect();
+                                    }
+
+                                    if(btnAdd) btnAdd.addEventListener('click', () => moveOptions(availList, exclList));
+                                    if(btnRemove) btnRemove.addEventListener('click', () => moveOptions(exclList, availList));
+                                    
+                                    // Double click to move
+                                    if(availList) availList.addEventListener('dblclick', (e) => {
+                                        if(e.target.tagName === 'OPTION') moveOptions(availList, exclList);
+                                    });
+                                    if(exclList) exclList.addEventListener('dblclick', (e) => {
+                                        if(e.target.tagName === 'OPTION') moveOptions(exclList, availList);
+                                    });
+
+                                    // Simple Search filter
+                                    function filterList(searchInputId, listId) {
+                                        const searchInput = document.getElementById(searchInputId);
+                                        if(!searchInput) return;
+                                        searchInput.addEventListener('input', function() {
+                                            const term = this.value.toLowerCase();
+                                            const list = document.getElementById(listId);
+                                            Array.from(list.options).forEach(opt => {
+                                                if (opt.text.toLowerCase().includes(term)) {
+                                                    opt.style.display = '';
+                                                } else {
+                                                    opt.style.display = 'none';
+                                                    opt.selected = false;
+                                                }
+                                            });
+                                        });
+                                    }
+                                    
+                                    filterList('xep_search_available', 'xep_available_list');
+                                    filterList('xep_search_excluded', 'xep_excluded_list');
+                                })();
+                                </script>
+                            </div>
+                        </div>
+
+                        <!-- NEW SHIPPING RATES UI -->
+                        <div class="xep-section-card" style="margin-top: 30px;">
+                            <h3>Shipping Rates (Country Based)</h3>
+                            <p class="description" style="margin-bottom: 25px;">Define custom shipping costs using USD. Use the base cost for all other countries not specifically defined in any zone.</p>
+                            
+                            <!-- Base cost -->
+                            <div class="xep-form-group" style="margin-bottom: 30px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 30px;">
+                                <label style="display:block; font-weight:600; color:var(--admin-primary); margin-bottom:10px;">Base Shipping Cost ($)</label>
+                                <div style="display:flex; align-items:center;">
+                                    <span style="background:rgba(0,0,0,0.3); padding:10px; border-radius:6px 0 0 6px; border:1px solid var(--admin-border); border-right:none; color:#fff;">$</span>
+                                    <input type="number" step="0.01" min="0" name="xepmarket2_shipping_base_cost" value="<?php echo esc_attr(get_option('xepmarket2_shipping_base_cost', '0')); ?>" style="width: 150px; background: rgba(0,0,0,0.1) !important; color:#fff; border-radius:0 6px 6px 0; border:1px solid var(--admin-border);" />
+                                </div>
+                                <p class="description" style="margin-top:10px; color:#aaa;">Applies to 'All Countries' unless a specific zone matches below. Leave 0 for Free Shipping.</p>
+                            </div>
+
+                            <!-- Custom Zones -->
+                            <div id="xep-shipping-zones-wrap">
+                                <h4 style="color:#fff; margin-bottom:15px; font-size:16px;">Custom Shipping Zones</h4>
+                                <input type="hidden" name="xepmarket2_shipping_zones" id="xepmarket2_shipping_zones" value="<?php echo esc_attr(get_option('xepmarket2_shipping_zones', '[]')); ?>" />
+                                <div id="xep-shipping-zones-list" style="display:flex; flex-direction:column; gap:20px;">
+                                    <!-- Populated by JS -->
+                                </div>
+                                <button type="button" class="xep-save-btn" onclick="xepAddShippingZone()" style="margin-top:20px; border-radius:6px; padding: 10px 16px; background:var(--admin-secondary); color:#fff; border:none; cursor:pointer;"><i class="fas fa-plus"></i> Add New Zone</button>
+                            </div>
+                        </div>
+
+                        <script>
+                        (function() {
+                            const rawZones = document.getElementById('xepmarket2_shipping_zones').value;
+                            let shippingZones = [];
+                            try { shippingZones = JSON.parse(rawZones); } catch(e){}
+
+                            // Get all countries defined earlier for the exclusion UI
+                            const allCountriesJson = <?php echo !empty($all_countries) ? json_encode($all_countries) : '{}'; ?>;
+
+                            function renderShippingZones() {
+                                const list = document.getElementById('xep-shipping-zones-list');
+                                list.innerHTML = '';
+
+                                if(shippingZones.length === 0) {
+                                    list.innerHTML = '<p style="color:#aaa; font-style:italic;">No custom zones defined. Base cost applies to all valid countries.</p>';
+                                }
+
+                                shippingZones.forEach((zone, index) => {
+                                    const id = 'zone_' + Math.random().toString(36).substr(2, 9);
+                                    zone.id = zone.id || id;
+                                    
+                                    let availOptions = '';
+                                    let selOptions = '';
+                                    let hiddenSelectOpts = '';
+                                    
+                                    for (const [code, name] of Object.entries(allCountriesJson)) {
+                                        const escName = name.replace(/'/g, "&#39;"); // simple escape
+                                        if (zone.countries && zone.countries.includes(code)) {
+                                            selOptions += `<option value="${code}">${escName} (${code})</option>`;
+                                            hiddenSelectOpts += `<option value="${code}" selected>${escName} (${code})</option>`;
+                                        } else {
+                                            availOptions += `<option value="${code}">${escName} (${code})</option>`;
+                                        }
+                                    }
+
+                                    const hiddenHtml = `<select multiple class="xep-zone-countries" data-index="${index}" style="display:none;">${hiddenSelectOpts}</select>`;
+
+                                    let dualListHtml = `
+                                        <div style="display:flex; gap:20px; align-items:stretch;">
+                                            <div style="flex:1; display:flex; flex-direction:column;">
+                                                <label style="font-weight:600; margin-bottom:5px; font-size:12px; color:var(--admin-text);">Available Countries</label>
+                                                <input type="text" class="xep-zone-search-avail" data-index="${index}" placeholder="Search..." style="margin-bottom:8px; width:100%; background:rgba(0,0,0,0.1) !important; color:#fff; padding:6px 10px; border-radius:4px; border:1px solid var(--admin-border);" />
+                                                <select multiple class="xep-zone-avail-list" data-index="${index}" style="width:100%; height:160px; background:rgba(0,0,0,0.2); border:1px solid var(--admin-border); color:#fff; padding:10px; border-radius:8px; font-family:inherit; font-size:13px;">
+                                                    ${availOptions}
+                                                </select>
+                                            </div>
+                                            <div style="display:flex; flex-direction:column; justify-content:center; gap:10px;">
+                                                <button type="button" class="xep-zone-add-btn" data-index="${index}" style="padding:8px 12px; background:var(--admin-secondary); border:none; border-radius:4px; color:#fff; cursor:pointer;" title="Add"><i class="fas fa-chevron-right"></i></button>
+                                                <button type="button" class="xep-zone-remove-btn" data-index="${index}" style="padding:8px 12px; background:rgba(255,255,255,0.1); border:none; border-radius:4px; color:#fff; cursor:pointer;" title="Remove"><i class="fas fa-chevron-left"></i></button>
+                                            </div>
+                                            <div style="flex:1; display:flex; flex-direction:column;">
+                                                <label style="font-weight:600; margin-bottom:5px; font-size:12px; color:var(--admin-primary);">Selected Countries</label>
+                                                <input type="text" class="xep-zone-search-sel" data-index="${index}" placeholder="Search..." style="margin-bottom:8px; width:100%; background:rgba(0,0,0,0.1) !important; color:#fff; padding:6px 10px; border-radius:4px; border:1px solid var(--admin-border);" />
+                                                <select multiple class="xep-zone-sel-list" data-index="${index}" style="width:100%; height:160px; background:rgba(0,0,0,0.2); border:1px solid var(--admin-primary); box-shadow:0 0 10px rgba(0,242,255,0.1); color:#fff; padding:10px; border-radius:8px; font-family:inherit; font-size:13px;">
+                                                    ${selOptions}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    `;
+
+                                    const row = document.createElement('div');
+                                    row.style.cssText = 'background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 20px; position:relative;';
+                                    row.innerHTML = `
+                                        <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                                            <div style="display:flex; gap: 20px; flex:1;">
+                                                <div style="flex:1;">
+                                                    <label style="display:block; font-size:13px; font-weight:600; margin-bottom:8px; color:var(--admin-text);">Label Name <span style="color:#ff6b6b">*</span></label>
+                                                    <input type="text" class="xep-zone-name" data-index="${index}" value="${zone.name || ''}" placeholder="e.g. Europe Standard, USA Express..." style="width:100%; background: rgba(0,0,0,0.1) !important; color:#fff; padding:10px; border-radius:6px; border:1px solid var(--admin-border);" />
+                                                </div>
+                                                <div style="width: 150px;">
+                                                    <label style="display:block; font-size:13px; font-weight:600; margin-bottom:8px; color:var(--admin-text);">Cost ($)</label>
+                                                    <div style="display:flex; align-items:center;">
+                                                        <span style="background:rgba(0,0,0,0.3); padding:10px; border-radius:6px 0 0 6px; border:1px solid var(--admin-border); border-right:none; color:#fff;">$</span>
+                                                        <input type="number" step="0.01" min="0" class="xep-zone-cost" data-index="${index}" value="${zone.cost !== undefined ? zone.cost : 0}" style="width:100%; background: rgba(0,0,0,0.1) !important; color:#fff; padding:10px; border-radius:0 6px 6px 0; border:1px solid var(--admin-border);" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <button type="button" onclick="xepRemoveShippingZone(${index})" style="margin-left:20px; padding: 10px 15px; border-radius:6px; background:rgba(255,0,0,0.1); color:#ff4444; border:1px solid rgba(255,0,0,0.2); cursor:pointer; transition:all 0.3s;" onmouseover="this.style.background='rgba(255,0,0,0.2)'" onmouseout="this.style.background='rgba(255,0,0,0.1)'" title="Delete Zone"><i class="fas fa-trash"></i></button>
+                                        </div>
+                                        ${hiddenHtml}
+                                        ${dualListHtml}
+                                    `;
+                                    list.appendChild(row);
+                                });
+                                
+                                // Attach base listeners
+                                list.querySelectorAll('.xep-zone-name').forEach(inp => inp.addEventListener('input', updateShippingZoneData));
+                                list.querySelectorAll('.xep-zone-cost').forEach(inp => inp.addEventListener('input', updateShippingZoneData));
+
+                                // Attach dual-list listeners
+                                function updateZoneHiddenSelect(index) {
+                                    const hiddenSel = document.querySelector(`.xep-zone-countries[data-index="${index}"]`);
+                                    const selList = document.querySelector(`.xep-zone-sel-list[data-index="${index}"]`);
+                                    if(hiddenSel && selList) {
+                                        hiddenSel.innerHTML = '';
+                                        Array.from(selList.options).forEach(opt => {
+                                            const newOpt = document.createElement('option');
+                                            newOpt.value = opt.value;
+                                            newOpt.selected = true;
+                                            hiddenSel.appendChild(newOpt);
+                                        });
+                                        updateShippingZoneData();
+                                    }
+                                }
+
+                                function moveZoneOptions(sourceList, targetList, idx) {
+                                    const selectedOpts = Array.from(sourceList.selectedOptions);
+                                    if(selectedOpts.length === 0) return;
+                                    selectedOpts.forEach(opt => {
+                                        if(!opt.disabled) {
+                                            const newO = opt.cloneNode(true);
+                                            newO.selected = false;
+                                            targetList.appendChild(newO);
+                                            opt.remove();
+                                        }
+                                    });
+                                    // sort
+                                    const opts = Array.from(targetList.options);
+                                    opts.sort((a,b) => a.text.localeCompare(b.text));
+                                    targetList.innerHTML = '';
+                                    opts.forEach(o => targetList.appendChild(o));
+                                    updateZoneHiddenSelect(idx);
+                                }
+
+                                list.querySelectorAll('.xep-zone-add-btn').forEach(btn => {
+                                    btn.addEventListener('click', function() {
+                                        const idx = this.getAttribute('data-index');
+                                        const avail = document.querySelector(`.xep-zone-avail-list[data-index="${idx}"]`);
+                                        const sel = document.querySelector(`.xep-zone-sel-list[data-index="${idx}"]`);
+                                        moveZoneOptions(avail, sel, idx);
+                                    });
+                                });
+
+                                list.querySelectorAll('.xep-zone-remove-btn').forEach(btn => {
+                                    btn.addEventListener('click', function() {
+                                        const idx = this.getAttribute('data-index');
+                                        const avail = document.querySelector(`.xep-zone-avail-list[data-index="${idx}"]`);
+                                        const sel = document.querySelector(`.xep-zone-sel-list[data-index="${idx}"]`);
+                                        moveZoneOptions(sel, avail, idx);
+                                    });
+                                });
+
+                                list.querySelectorAll('.xep-zone-avail-list').forEach(l => {
+                                    l.addEventListener('dblclick', function(e) {
+                                        if(e.target.tagName === 'OPTION') {
+                                            const idx = this.getAttribute('data-index');
+                                            const sel = document.querySelector(`.xep-zone-sel-list[data-index="${idx}"]`);
+                                            moveZoneOptions(this, sel, idx);
+                                        }
+                                    });
+                                });
+
+                                list.querySelectorAll('.xep-zone-sel-list').forEach(l => {
+                                    l.addEventListener('dblclick', function(e) {
+                                        if(e.target.tagName === 'OPTION') {
+                                            const idx = this.getAttribute('data-index');
+                                            const avail = document.querySelector(`.xep-zone-avail-list[data-index="${idx}"]`);
+                                            moveZoneOptions(this, avail, idx);
+                                        }
+                                    });
+                                });
+
+                                // Search
+                                list.querySelectorAll('.xep-zone-search-avail').forEach(inp => {
+                                    inp.addEventListener('input', function() {
+                                        const term = this.value.toLowerCase();
+                                        const idx = this.getAttribute('data-index');
+                                        const avail = document.querySelector(`.xep-zone-avail-list[data-index="${idx}"]`);
+                                        Array.from(avail.options).forEach(opt => {
+                                            opt.style.display = opt.text.toLowerCase().includes(term) ? '' : 'none';
+                                        });
+                                    });
+                                });
+
+                                list.querySelectorAll('.xep-zone-search-sel').forEach(inp => {
+                                    inp.addEventListener('input', function() {
+                                        const term = this.value.toLowerCase();
+                                        const idx = this.getAttribute('data-index');
+                                        const sel = document.querySelector(`.xep-zone-sel-list[data-index="${idx}"]`);
+                                        Array.from(sel.options).forEach(opt => {
+                                            opt.style.display = opt.text.toLowerCase().includes(term) ? '' : 'none';
+                                        });
+                                    });
+                                });
+                            }
+
+                            function updateShippingZoneData() {
+                                shippingZones.forEach((zone, index) => {
+                                    const nameInput = document.querySelector(`.xep-zone-name[data-index="${index}"]`);
+                                    const costInput = document.querySelector(`.xep-zone-cost[data-index="${index}"]`);
+                                    const hiddenSelect = document.querySelector(`.xep-zone-countries[data-index="${index}"]`);
+                                    
+                                    if (nameInput) zone.name = nameInput.value;
+                                    if (costInput) zone.cost = costInput.value;
+                                    if (hiddenSelect) {
+                                        zone.countries = Array.from(hiddenSelect.options).map(opt => opt.value);
+                                    }
+                                });
+                                document.getElementById('xepmarket2_shipping_zones').value = JSON.stringify(shippingZones);
+                            }
+
+                            window.xepAddShippingZone = function() {
+                                shippingZones.push({ id: 'zone_' + Math.random().toString(36).substr(2, 9), name: '', cost: '0', countries: [] });
+                                renderShippingZones();
+                                updateShippingZoneData();
+                            };
+
+                            window.xepRemoveShippingZone = function(index) {
+                                if(confirm('Are you sure you want to remove this shipping zone?')) {
+                                    shippingZones.splice(index, 1);
+                                    renderShippingZones();
+                                    updateShippingZoneData();
+                                }
+                            };
+
+                            // Initialize
+                            renderShippingZones();
+                        })();
+                        </script>
+                        </div>
+                    </div>
+
                     <!-- Tab: Checkout Customization -->
                     <div id="tab-checkout" class="xep-tab-content">
                         <div class="xep-section-card">
                             <h3>Checkout Field Settings</h3>
-                            <p class="description" style="margin-bottom: 25px;">Enable or disable specific billing and
-                                shipping fields required from customers during checkout.</p>
+                            <p class="description" style="margin-bottom: 25px;">Enable or disable specific billing and shipping fields required from customers during checkout.</p>
 
                             <?php
                             $chk_fields_config = [
                                 'first_name' => ['label' => 'First Name', 'default' => '1', 'order' => '1'],
-                                'last_name' => ['label' => 'Last Name', 'default' => '1', 'order' => '1'],
-                                'company' => ['label' => 'Company', 'default' => '0', 'order' => '2'],
-                                'country' => ['label' => 'Country', 'default' => '1', 'order' => '3'],
-                                'address_1' => ['label' => 'Address Line 1', 'default' => '1', 'order' => '4'],
-                                'address_2' => ['label' => 'Address Line 2', 'default' => '0', 'order' => '5'],
-                                'city' => ['label' => 'City', 'default' => '1', 'order' => '6'],
-                                'state' => ['label' => 'State / County', 'default' => '1', 'order' => '6'],
-                                'postcode' => ['label' => 'Postcode / ZIP', 'default' => '1', 'order' => '7'],
-                                'phone' => ['label' => 'Phone Number', 'default' => '1', 'order' => '8'],
-                                'email' => ['label' => 'Email Address', 'default' => '1', 'order' => '9'],
-                                'telegram' => ['label' => 'Telegram Username', 'default' => '1', 'order' => '8']
+                                'last_name'  => ['label' => 'Last Name',  'default' => '1', 'order' => '1'],
+                                'company'    => ['label' => 'Company',    'default' => '0', 'order' => '2'],
+                                'country'    => ['label' => 'Country',    'default' => '1', 'order' => '3'],
+                                'address_1'  => ['label' => 'Address Line 1', 'default' => '1', 'order' => '4'],
+                                'address_2'  => ['label' => 'Address Line 2', 'default' => '0', 'order' => '5'],
+                                'city'       => ['label' => 'City',       'default' => '1', 'order' => '6'],
+                                'state'      => ['label' => 'State / County', 'default' => '1', 'order' => '6'],
+                                'postcode'   => ['label' => 'Postcode / ZIP', 'default' => '1', 'order' => '7'],
+                                'phone'      => ['label' => 'Phone Number',   'default' => '1', 'order' => '8'],
+                                'email'      => ['label' => 'Email Address',  'default' => '1', 'order' => '9'],
+                                'telegram'   => ['label' => 'Telegram Username', 'default' => '1', 'order' => '8'],
                             ];
 
-                            // Sort fields by saved order for initial display
+                            // Build sorted_fields for template access
                             $sorted_fields = [];
                             foreach ($chk_fields_config as $fid => $fdata) {
                                 $saved_order = intval(get_option('xepmarket2_chk_order_' . $fid, $fdata['order']));
                                 $sorted_fields[$fid] = array_merge($fdata, ['saved_order' => $saved_order]);
                             }
-                            uasort($sorted_fields, function ($a, $b) {
-                                return $a['saved_order'] - $b['saved_order'];
+
+                            $custom_fields_json = get_option('xepmarket2_chk_custom_fields', '[]');
+                            $custom_fields_list = json_decode($custom_fields_json, true);
+                            if (!is_array($custom_fields_list)) $custom_fields_list = [];
+
+                            // Build all_items list
+                            $all_items = [];
+                            foreach ($sorted_fields as $fid => $fdata) {
+                                $all_items[] = [
+                                    'type'  => 'standard',
+                                    'id'    => $fid,
+                                    'order' => $fdata['saved_order'],
+                                    'width' => get_option('xepmarket2_chk_width_' . $fid, 'half'),
+                                ];
+                            }
+                            foreach ($custom_fields_list as $cf) {
+                                $all_items[] = [
+                                    'type'     => 'custom',
+                                    'id'       => isset($cf['id']) ? $cf['id'] : ('custom_' . uniqid()),
+                                    'order'    => isset($cf['order']) ? intval($cf['order']) : 99,
+                                    'width'    => (isset($cf['width']) && $cf['width'] === 'full') ? 'full' : 'half',
+                                    'label'    => isset($cf['label']) ? $cf['label'] : '',
+                                    'required' => !empty($cf['required']),
+                                ];
+                            }
+                            usort($all_items, function ($a, $b) {
+                                if ($a['order'] !== $b['order']) return $a['order'] - $b['order'];
+                                return strcmp($a['type'], $b['type']);
                             });
+
+                            // Group into rows: same order + both half = side by side
+                            $rows = [];
+                            $i = 0;
+                            while ($i < count($all_items)) {
+                                $item = $all_items[$i];
+                                if ($item['width'] === 'full') {
+                                    $rows[] = ['left' => $item, 'right' => null, 'full' => true];
+                                    $i++;
+                                } else {
+                                    if (($i + 1) < count($all_items)) {
+                                        $next = $all_items[$i + 1];
+                                        if ($next['width'] === 'half' && $next['order'] === $item['order']) {
+                                            $rows[] = ['left' => $item, 'right' => $next, 'full' => false];
+                                            $i += 2;
+                                            continue;
+                                        }
+                                    }
+                                    $rows[] = ['left' => $item, 'right' => null, 'full' => false];
+                                    $i++;
+                                }
+                            }
                             ?>
 
-                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;"><i
-                                    class="fas fa-info-circle"></i> Drag fields to reorder or set order numbers manually.
-                                <strong>Same number = side by side.</strong>
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+                                <i class="fas fa-info-circle"></i>
+                                <strong>Sira No</strong> girerek sirayin. Ayni sira numarasi + <strong>2/1</strong> genislik olan alanlar <strong>yan yana</strong> gorunur. <strong>2/2 = tam satir</strong>. Kaydet sonrasi uygulanir.
                             </p>
 
-                            <div id="xep_default_fields_sortable" style="display:flex;flex-wrap:wrap;gap:8px;">
-                                <?php foreach ($sorted_fields as $field_id => $field_data): ?>
-                                    <div class="xep-sortable-row" data-field-id="<?php echo esc_attr($field_id); ?>"
-                                        draggable="true"
-                                        style="display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--admin-border); padding: 14px 16px; border-radius: 10px; background: rgba(255,255,255,0.02); cursor: grab; transition: all 0.2s ease; width: 100%; box-sizing: border-box;">
+                            <style>
+                                .xep-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 900px; }
+                                .xep-field-grid .xep-field-full { grid-column: 1 / -1; }
+                                .xep-field-card { display: flex; align-items: center; border: 1px solid var(--admin-border); padding: 12px 14px; border-radius: 10px; background: rgba(255,255,255,0.02); gap: 10px; box-sizing: border-box; min-height: 60px; }
+                                .xep-field-card:hover { background: rgba(0,242,255,0.04); }
+                                .xep-order-badge { display: flex; align-items: center; justify-content: center; background: rgba(0,242,255,0.08); border: 1px solid rgba(0,242,255,0.3); border-radius: 8px; padding: 3px 5px; flex-shrink: 0; }
+                                .xep-order-badge input[type=number] { width: 38px; background: transparent; border: none; outline: none; color: var(--admin-primary); font-weight: 700; font-size: 14px; text-align: center; -moz-appearance: textfield; }
+                                .xep-order-badge input[type=number]::-webkit-inner-spin-button, .xep-order-badge input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+                                .xep-field-card .xep-width-selector { display:flex; align-items:center; gap:3px; flex-shrink: 0; }
+                                .xep-field-card .xep-width-selector label { cursor:pointer; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; }
+                                .xep-field-card .xep-width-selector input[type=radio] { display:none; }
+                            </style>
 
-                                        <!-- Drag Handle -->
-                                        <div class="xep-drag-handle"
-                                            style="margin-right: 15px; color: var(--text-muted); font-size: 18px; opacity: 0.4; cursor: grab;"
-                                            title="Drag to reorder">
-                                            <i class="fas fa-grip-vertical"></i>
-                                        </div>
-
-                                        <!-- Field Name -->
-                                        <div style="flex: 1; margin-right: 20px;">
-                                            <input type="text" name="xepmarket2_chk_name_<?php echo esc_attr($field_id); ?>"
-                                                value="<?php echo esc_attr(get_option('xepmarket2_chk_name_' . $field_id, $field_data['label'])); ?>"
-                                                style="border: none; border-bottom: 1px dashed rgba(255,255,255,0.2); background: transparent; color: inherit; font-weight: 700; font-size: 15px; width: 100%; max-width: 280px; padding: 5px;"
-                                                placeholder="<?php echo esc_attr($field_data['label']); ?>" />
-                                        </div>
-
-                                        <!-- Controls -->
-                                        <div style="display: flex; align-items: center; gap: 12px;">
-                                            <!-- Order Number -->
-                                            <div style="display: flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 12px;"
-                                                title="Order number. Same number = side by side">
-                                                <input type="number"
-                                                    name="xepmarket2_chk_order_<?php echo esc_attr($field_id); ?>"
-                                                    class="xep-order-input"
-                                                    value="<?php echo esc_attr($field_data['saved_order']); ?>" min="1" max="99"
-                                                    style="width: 44px; background: rgba(255,255,255,0.06); border: 1px solid var(--admin-border); color: var(--admin-primary); border-radius: 6px; padding: 4px 4px; text-align: center; font-size: 13px; font-weight: 700;" />
+                            <div class="xep-field-grid">
+                                <?php foreach ($rows as $row): ?>
+                                    <?php
+                                    $left  = $row['left'];
+                                    $right = $row['right'];
+                                    $cls   = $row['full'] ? 'xep-field-full' : '';
+                                    ?>
+                                    <div class="<?php echo $cls; ?>">
+                                        <?php if ($left['type'] === 'standard'): $fid = $left['id']; $fdata = $sorted_fields[$fid]; ?>
+                                        <div class="xep-field-card">
+                                            <div class="xep-order-badge" title="Sira No">
+                                                <input type="number" name="xepmarket2_chk_order_<?php echo esc_attr($fid); ?>" value="<?php echo esc_attr($left['order']); ?>" min="1" max="99" />
                                             </div>
-                                            <!-- Required -->
-                                            <label
-                                                style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-muted); font-size: 13px; white-space: nowrap;">
-                                                <input type="checkbox"
-                                                    name="xepmarket2_chk_req_<?php echo esc_attr($field_id); ?>" value="1" <?php checked(1, get_option('xepmarket2_chk_req_' . $field_id, '1'), true); ?> />
-                                                REQ
-                                            </label>
-                                            <!-- Enable/Disable Toggle -->
-                                            <label class="xep-switch">
-                                                <input type="checkbox" name="xepmarket2_chk_<?php echo esc_attr($field_id); ?>"
-                                                    value="1" <?php checked(1, get_option('xepmarket2_chk_' . $field_id, $field_data['default']), true); ?> />
-                                                <span class="xep-slider"></span>
-                                            </label>
+                                            <div style="flex:1;min-width:0;">
+                                                <input type="text" name="xepmarket2_chk_name_<?php echo esc_attr($fid); ?>" value="<?php echo esc_attr(get_option('xepmarket2_chk_name_' . $fid, $fdata['label'])); ?>" style="border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:inherit;font-weight:700;font-size:14px;width:100%;padding:3px;" placeholder="<?php echo esc_attr($fdata['label']); ?>" />
+                                            </div>
+                                            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                                                <div class="xep-width-selector">
+                                                    <label><input type="radio" name="xepmarket2_chk_width_<?php echo esc_attr($fid); ?>" value="half" <?php checked(get_option('xepmarket2_chk_width_' . $fid, 'half'), 'half'); ?>> 2/1</label>
+                                                    <label><input type="radio" name="xepmarket2_chk_width_<?php echo esc_attr($fid); ?>" value="full" <?php checked(get_option('xepmarket2_chk_width_' . $fid, 'half'), 'full'); ?>> 2/2</label>
+                                                </div>
+                                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-muted);font-size:12px;white-space:nowrap;"><input type="checkbox" name="xepmarket2_chk_req_<?php echo esc_attr($fid); ?>" value="1" <?php checked(1, get_option('xepmarket2_chk_req_' . $fid, '1'), true); ?> /> REQ</label>
+                                                <label class="xep-switch"><input type="checkbox" name="xepmarket2_chk_<?php echo esc_attr($fid); ?>" value="1" <?php checked(1, get_option('xepmarket2_chk_' . $fid, $fdata['default']), true); ?> /><span class="xep-slider"></span></label>
+                                            </div>
                                         </div>
+                                        <?php else: $cf = $left; $cfid = esc_attr($cf['id']); ?>
+                                        <div class="xep-field-card xep-cf-row" data-cf-id="<?php echo $cfid; ?>">
+                                            <div class="xep-order-badge" title="Sira No">
+                                                <input type="number" class="xep-cf-order" value="<?php echo esc_attr($cf['order']); ?>" min="1" max="99" />
+                                            </div>
+                                            <div style="flex:1;min-width:0;">
+                                                <input type="text" class="xep-cf-label" value="<?php echo esc_attr($cf['label']); ?>" placeholder="Custom field label" style="border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:inherit;font-weight:700;font-size:14px;width:100%;padding:3px;" />
+                                            </div>
+                                            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                                                <div class="xep-width-selector">
+                                                    <label><input type="radio" class="xep-cf-width" name="xep_cf_width_<?php echo $cfid; ?>" value="half" <?php checked($cf['width'], 'half'); ?>> 2/1</label>
+                                                    <label><input type="radio" class="xep-cf-width" name="xep_cf_width_<?php echo $cfid; ?>" value="full" <?php checked($cf['width'], 'full'); ?>> 2/2</label>
+                                                </div>
+                                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-muted);font-size:12px;white-space:nowrap;"><input type="checkbox" class="xep-cf-required" <?php checked($cf['required']); ?> /> REQ</label>
+                                                <button type="button" class="xep-cf-remove" style="background:rgba(255,69,58,0.1);color:#ff453a;border:1px solid rgba(255,69,58,0.2);padding:5px 9px;border-radius:7px;cursor:pointer;font-size:11px;"><i class="fas fa-trash"></i></button>
+                                            </div>
+                                        </div>
+                                        <?php endif; ?>
                                     </div>
+
+                                    <?php if (!$row['full'] && $right): ?>
+                                    <div>
+                                        <?php if ($right['type'] === 'standard'): $fid = $right['id']; $fdata = $sorted_fields[$fid]; ?>
+                                        <div class="xep-field-card">
+                                            <div class="xep-order-badge" title="Sira No">
+                                                <input type="number" name="xepmarket2_chk_order_<?php echo esc_attr($fid); ?>" value="<?php echo esc_attr($right['order']); ?>" min="1" max="99" />
+                                            </div>
+                                            <div style="flex:1;min-width:0;">
+                                                <input type="text" name="xepmarket2_chk_name_<?php echo esc_attr($fid); ?>" value="<?php echo esc_attr(get_option('xepmarket2_chk_name_' . $fid, $fdata['label'])); ?>" style="border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:inherit;font-weight:700;font-size:14px;width:100%;padding:3px;" placeholder="<?php echo esc_attr($fdata['label']); ?>" />
+                                            </div>
+                                            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                                                <div class="xep-width-selector">
+                                                    <label><input type="radio" name="xepmarket2_chk_width_<?php echo esc_attr($fid); ?>" value="half" <?php checked(get_option('xepmarket2_chk_width_' . $fid, 'half'), 'half'); ?>> 2/1</label>
+                                                    <label><input type="radio" name="xepmarket2_chk_width_<?php echo esc_attr($fid); ?>" value="full" <?php checked(get_option('xepmarket2_chk_width_' . $fid, 'half'), 'full'); ?>> 2/2</label>
+                                                </div>
+                                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-muted);font-size:12px;white-space:nowrap;"><input type="checkbox" name="xepmarket2_chk_req_<?php echo esc_attr($fid); ?>" value="1" <?php checked(1, get_option('xepmarket2_chk_req_' . $fid, '1'), true); ?> /> REQ</label>
+                                                <label class="xep-switch"><input type="checkbox" name="xepmarket2_chk_<?php echo esc_attr($fid); ?>" value="1" <?php checked(1, get_option('xepmarket2_chk_' . $fid, $fdata['default']), true); ?> /><span class="xep-slider"></span></label>
+                                            </div>
+                                        </div>
+                                        <?php else: $cf = $right; $cfid = esc_attr($cf['id']); ?>
+                                        <div class="xep-field-card xep-cf-row" data-cf-id="<?php echo $cfid; ?>">
+                                            <div class="xep-order-badge" title="Sira No">
+                                                <input type="number" class="xep-cf-order" value="<?php echo esc_attr($cf['order']); ?>" min="1" max="99" />
+                                            </div>
+                                            <div style="flex:1;min-width:0;">
+                                                <input type="text" class="xep-cf-label" value="<?php echo esc_attr($cf['label']); ?>" placeholder="Custom field label" style="border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:inherit;font-weight:700;font-size:14px;width:100%;padding:3px;" />
+                                            </div>
+                                            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                                                <div class="xep-width-selector">
+                                                    <label><input type="radio" class="xep-cf-width" name="xep_cf_width_<?php echo $cfid; ?>" value="half" <?php checked($cf['width'], 'half'); ?>> 2/1</label>
+                                                    <label><input type="radio" class="xep-cf-width" name="xep_cf_width_<?php echo $cfid; ?>" value="full" <?php checked($cf['width'], 'full'); ?>> 2/2</label>
+                                                </div>
+                                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-muted);font-size:12px;white-space:nowrap;"><input type="checkbox" class="xep-cf-required" <?php checked($cf['required']); ?> /> REQ</label>
+                                                <button type="button" class="xep-cf-remove" style="background:rgba(255,69,58,0.1);color:#ff453a;border:1px solid rgba(255,69,58,0.2);padding:5px 9px;border-radius:7px;cursor:pointer;font-size:11px;"><i class="fas fa-trash"></i></button>
+                                            </div>
+                                        </div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <?php elseif (!$row['full']): ?>
+                                    <div></div>
+                                    <?php endif; ?>
+
                                 <?php endforeach; ?>
                             </div>
 
-                            <!-- Drag & Drop Script for Default Fields -->
                             <script>
-                                (function () {
-                                    var sortable = document.getElementById('xep_default_fields_sortable');
-                                    var dragEl = null;
-                                    var dropMode = 'between'; // 'between' or 'pair'
-                                    var dropTarget = null;
-
-                                    sortable.addEventListener('dragstart', function (e) {
-                                        dragEl = e.target.closest('.xep-sortable-row');
-                                        if (!dragEl) return;
-                                        dragEl.style.opacity = '0.4';
-                                        e.dataTransfer.effectAllowed = 'move';
-                                        e.dataTransfer.setData('text/plain', '');
+                            (function(){
+                                var G=document.querySelector('.xep-field-grid');
+                                if(!G)return;
+                                function styleBtn(box){
+                                    box.querySelectorAll('label').forEach(function(l){
+                                        var r=l.querySelector('input[type=radio]');if(!r)return;
+                                        l.style.background=r.checked?'var(--admin-primary)':'rgba(255,255,255,0.06)';
+                                        l.style.color=r.checked?'#000':'var(--text-muted)';
+                                        l.style.transition='background 0.15s';
                                     });
-
-                                    sortable.addEventListener('dragend', function () {
-                                        if (dragEl) {
-                                            dragEl.style.opacity = '1';
-                                        }
-                                        clearHighlights();
-                                        dragEl = null;
-                                        dropTarget = null;
+                                }
+                                G.querySelectorAll('.xep-width-selector').forEach(styleBtn);
+                                function collect(){
+                                    var list=[];
+                                    G.querySelectorAll('.xep-field-card').forEach(function(card){
+                                        var ni=card.querySelector('input[type=number]');
+                                        var ri=card.querySelector('input[type=radio]:checked');
+                                        list.push({el:card, order:ni?parseInt(ni.value,10)||1:99, width:ri?ri.value:'half'});
                                     });
-
-                                    sortable.addEventListener('dragover', function (e) {
-                                        e.preventDefault();
-                                        e.dataTransfer.dropEffect = 'move';
-                                        var target = e.target.closest('.xep-sortable-row');
-                                        if (!target || target === dragEl) return;
-
-                                        clearHighlights();
-                                        dropTarget = target;
-
-                                        var rect = target.getBoundingClientRect();
-                                        var relY = e.clientY - rect.top;
-                                        var height = rect.height;
-
-                                        if (relY > height * 0.25 && relY < height * 0.75) {
-                                            // Middle zone = PAIR (same order number)
-                                            dropMode = 'pair';
-                                            target.style.background = 'rgba(0, 242, 255, 0.08)';
-                                            target.style.border = '1px solid rgba(0, 242, 255, 0.5)';
-                                            target.style.boxShadow = '0 0 12px rgba(0, 242, 255, 0.15)';
-                                        } else if (relY <= height * 0.25) {
-                                            // Top zone = INSERT BEFORE
-                                            dropMode = 'before';
-                                            target.style.borderTop = '2px solid var(--admin-primary)';
+                                    return list;
+                                }
+                                function reorder(){
+                                    var cards=collect();
+                                    cards.sort(function(a,b){return a.order!==b.order?a.order-b.order:0;});
+                                    var cols=[];
+                                    var i=0;
+                                    while(i<cards.length){
+                                        var c=cards[i];
+                                        if(c.width==='full'){
+                                            var d=document.createElement('div');d.className='xep-field-full';d.appendChild(c.el);cols.push(d);i++;
+                                        } else if(i+1<cards.length && cards[i+1].width==='half' && cards[i+1].order===c.order){
+                                            var dL=document.createElement('div');dL.appendChild(c.el);cols.push(dL);
+                                            var dR=document.createElement('div');dR.appendChild(cards[i+1].el);cols.push(dR);
+                                            i+=2;
                                         } else {
-                                            // Bottom zone = INSERT AFTER
-                                            dropMode = 'after';
-                                            target.style.borderBottom = '2px solid var(--admin-primary)';
-                                        }
-                                    });
-
-                                    sortable.addEventListener('drop', function (e) {
-                                        e.preventDefault();
-                                        if (!dropTarget || !dragEl || dropTarget === dragEl) return;
-
-                                        var dragInput = dragEl.querySelector('.xep-order-input');
-                                        var targetInput = dropTarget.querySelector('.xep-order-input');
-
-                                        if (dropMode === 'pair') {
-                                            // Give dragged field the SAME order number as target
-                                            dragInput.value = targetInput.value;
-                                            // Move next to target in DOM
-                                            sortable.insertBefore(dragEl, dropTarget.nextSibling);
-                                        } else if (dropMode === 'before') {
-                                            sortable.insertBefore(dragEl, dropTarget);
-                                        } else {
-                                            sortable.insertBefore(dragEl, dropTarget.nextSibling);
-                                        }
-
-                                        clearHighlights();
-                                        highlightPairs();
-                                    });
-
-                                    function clearHighlights() {
-                                        sortable.querySelectorAll('.xep-sortable-row').forEach(function (r) {
-                                            r.style.borderTop = '';
-                                            r.style.borderBottom = '';
-                                            r.style.background = 'rgba(255,255,255,0.02)';
-                                            r.style.border = '1px solid var(--admin-border)';
-                                            r.style.boxShadow = 'none';
-                                            r.style.width = '100%';
-                                            r.style.borderLeft = '';
-                                        });
-                                    }
-
-                                    // Highlight rows only if they share the SAME order number AND are neighbors
-                                    function highlightPairs() {
-                                        var rows = Array.from(sortable.querySelectorAll('.xep-sortable-row'));
-
-                                        // Reset everything first
-                                        rows.forEach(function (row) {
-                                            row.style.width = '100%';
-                                            row.style.borderLeft = '';
-                                            row.classList.remove('xep-paired');
-                                        });
-
-                                        for (var i = 0; i < rows.length - 1; i++) {
-                                            var current = rows[i];
-                                            var next = rows[i + 1];
-                                            var curVal = current.querySelector('.xep-order-input').value;
-                                            var nextVal = next.querySelector('.xep-order-input').value;
-
-                                            // Only pair if values match and are valid numbers
-                                            if (curVal !== '' && curVal === nextVal && parseInt(curVal) > 0) {
-                                                current.style.width = 'calc(50% - 4px)';
-                                                next.style.width = 'calc(50% - 4px)';
-                                                current.style.borderLeft = '3px solid var(--admin-primary)';
-                                                next.style.borderLeft = '3px solid var(--admin-primary)';
-                                                current.classList.add('xep-paired');
-                                                next.classList.add('xep-paired');
-                                                i++; // Skip the next index as it's already paired
-                                            }
+                                            var dS=document.createElement('div');dS.appendChild(c.el);cols.push(dS);
+                                            cols.push(document.createElement('div'));
+                                            i++;
                                         }
                                     }
-
-                                    // When order number is manually changed, re-sort the rows
-                                    sortable.addEventListener('change', function (e) {
-                                        if (!e.target.classList.contains('xep-order-input')) return;
-
-                                        var rows = Array.from(sortable.querySelectorAll('.xep-sortable-row'));
-                                        rows.sort(function (a, b) {
-                                            var aVal = parseInt(a.querySelector('.xep-order-input').value) || 99;
-                                            var bVal = parseInt(b.querySelector('.xep-order-input').value) || 99;
-                                            return aVal - bVal;
-                                        });
-
-                                        rows.forEach(function (row) {
-                                            sortable.appendChild(row);
-                                        });
-
-                                        clearHighlights();
-                                        highlightPairs();
-                                    });
-
-                                    // Hover effect
-                                    sortable.addEventListener('mouseover', function (e) {
-                                        var row = e.target.closest('.xep-sortable-row');
-                                        if (row && !dragEl) {
-                                            row.style.background = 'rgba(0, 242, 255, 0.03)';
-                                        }
-                                    });
-                                    sortable.addEventListener('mouseout', function (e) {
-                                        var row = e.target.closest('.xep-sortable-row');
-                                        if (row && !dragEl) {
-                                            row.style.background = 'rgba(255,255,255,0.02)';
-                                        }
-                                    });
-
-                                    // Initial pair highlight
-                                    highlightPairs();
-                                })();
+                                    G.style.opacity='0.4';
+                                    setTimeout(function(){
+                                        while(G.firstChild)G.removeChild(G.firstChild);
+                                        cols.forEach(function(col){G.appendChild(col);});
+                                        G.style.opacity='1';
+                                        G.querySelectorAll('.xep-width-selector').forEach(styleBtn);
+                                    },120);
+                                }
+                                G.addEventListener('change',function(e){
+                                    if(e.target.type==='radio'){var b=e.target.closest('.xep-width-selector');if(b)styleBtn(b);setTimeout(reorder,50);}
+                                    if(e.target.type==='number')setTimeout(reorder,50);
+                                });
+                                G.addEventListener('input',function(e){
+                                    if(e.target.type==='number'){
+                                        clearTimeout(e.target._t);
+                                        e.target._t=setTimeout(reorder,600);
+                                    }
+                                });
+                            })();
                             </script>
 
                             <!-- Custom Fields Repeater -->
                             <div style="margin-top: 40px; border-top: 2px solid var(--admin-border); padding-top: 20px;">
                                 <h3 style="color: var(--admin-primary);"><i class="fas fa-plus-circle"></i> Add Custom
                                     Fields</h3>
-                                <p class="description" style="margin-bottom: 20px;">You can add, rename, and remove your own
-                                    custom text fields here. They will appear at the bottom of the checkout form.</p>
+                                <p class="description" style="margin-bottom: 20px;">Custom fields appear <strong>in the same grid above</strong> with standard fields (sorted by order). Choose <strong>2/1</strong> (half) or <strong>2/2</strong> (full row). Use <strong>Remove</strong> on each card to delete.</p>
 
                                 <input type="hidden" name="xepmarket2_chk_custom_fields" id="xep_custom_fields_data"
                                     value="<?php echo esc_attr(get_option('xepmarket2_chk_custom_fields', '[]')); ?>" />
-
-                                <div id="xep_custom_fields_container"></div>
 
                                 <button type="button" class="xep-save-btn" id="xep_add_custom_field_btn"
                                     style="margin-top: 20px; width: auto; background: rgba(0, 242, 255, 0.1) !important; color: var(--admin-primary) !important; border: 1px dashed var(--admin-primary) !important; margin-right: 15px;">
@@ -2411,99 +3366,68 @@ function xepmarket2_settings_page()
                             </div>
 
                             <script>
-                                (function () {
-                                    var container = document.getElementById('xep_custom_fields_container');
-                                    var btn = document.getElementById('xep_add_custom_field_btn');
-                                    var dataInput = document.getElementById('xep_custom_fields_data');
-                                    var form = document.getElementById('xep-settings-form');
-
-                                    var customFields = [];
-                                    try {
-                                        customFields = JSON.parse(dataInput.value || '[]');
-                                        if (!Array.isArray(customFields)) customFields = [];
-                                    } catch (e) {
-                                        customFields = [];
+                            (function(){
+                                var DI=document.getElementById('xep_custom_fields_data');
+                                var FRM=document.getElementById('xep-settings-form');
+                                var ABTN=document.getElementById('xep_add_custom_field_btn');
+                                var CF=[];
+                                try{CF=JSON.parse(DI?DI.value:'[]');if(!Array.isArray(CF))CF=[];}catch(e){CF=[];}
+                                function save(){if(DI)DI.value=JSON.stringify(CF);}
+                                function nextOrder(){var m=0;CF.forEach(function(f){m=Math.max(m,parseInt(f.order,10)||0);});return m+1;}
+                                if(ABTN&&FRM){ABTN.addEventListener('click',function(){CF.push({id:'custom_'+Date.now(),label:'',order:nextOrder(),width:'full',required:false});save();FRM.submit();});}
+                                if(FRM){FRM.addEventListener('submit',function(){save();});}
+                                /* Event delegation - Remove button */
+                                document.addEventListener('click',function(e){
+                                    var btn=e.target.closest('.xep-cf-remove');
+                                    if(!btn)return;
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    var row=btn.closest('[data-cf-id]');
+                                    if(!row)return;
+                                    var id=row.getAttribute('data-cf-id');
+                                    if(!confirm('Bu alanı silmek istediğinizden emin misiniz?'))return;
+                                    CF=CF.filter(function(f){return String(f.id)!==String(id);});
+                                    save();
+                                    /* Submit form to reload */
+                                    if(FRM){
+                                        FRM.submit();
+                                    } else {
+                                        /* Fallback: remove from DOM */
+                                        row.remove();
                                     }
-
-                                    function syncData() {
-                                        dataInput.value = JSON.stringify(customFields);
-                                    }
-
-                                    function renderFields() {
-                                        container.innerHTML = '';
-                                        customFields.forEach(function (field, index) {
-                                            var div = document.createElement('div');
-                                            div.className = 'xep-form-group';
-                                            div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:20px;margin-top:20px;background:rgba(255,255,255,0.02);border-radius:12px;border:1px solid var(--admin-border);';
-
-                                            var labelVal = field.label || '';
-                                            var checkedAttr = field.required ? ' checked' : '';
-                                            var orderVal = field.order || 99;
-
-                                            div.innerHTML = '<div style="flex:1;margin-right:20px;">' +
-                                                '<input type="text" class="cf-label" value="' + labelVal.replace(/"/g, '&quot;') + '" placeholder="Custom Field Label (e.g. Tax ID Number)" style="width:100%;border:none;border-bottom:1px dashed rgba(255,255,255,0.2);background:transparent;color:#fff;font-weight:700;font-size:16px;padding:5px;" />' +
-                                                '</div>' +
-                                                '<div style="display:flex;align-items:center;gap:15px;">' +
-                                                '<div style="display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px;" title="Order number. Same number = side by side">' +
-                                                '<i class="fas fa-sort-numeric-up" style="opacity:0.5;"></i>' +
-                                                '<input type="number" class="cf-order" value="' + orderVal + '" min="1" max="99" style="width:50px;background:rgba(255,255,255,0.05);border:1px solid var(--admin-border);color:#fff;border-radius:6px;padding:4px 6px;text-align:center;font-size:13px;" />' +
-                                                '</div>' +
-                                                '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-muted);font-size:14px;">' +
-                                                '<input type="checkbox" class="cf-required"' + checkedAttr + ' /> REQUIRED' +
-                                                '</label>' +
-                                                '<button type="button" class="cf-remove" style="background:rgba(255,69,58,0.1);color:#ff453a;border:1px solid rgba(255,69,58,0.2);padding:8px 12px;border-radius:8px;cursor:pointer;">' +
-                                                '<i class="fas fa-trash"></i> Remove' +
-                                                '</button>' +
-                                                '</div>';
-
-                                            var labelInput = div.querySelector('.cf-label');
-                                            var requiredInput = div.querySelector('.cf-required');
-                                            var orderInput = div.querySelector('.cf-order');
-                                            var removeBtn = div.querySelector('.cf-remove');
-
-                                            (function (idx) {
-                                                labelInput.addEventListener('input', function () {
-                                                    customFields[idx].label = this.value;
-                                                    syncData();
-                                                });
-                                                requiredInput.addEventListener('change', function () {
-                                                    customFields[idx].required = this.checked;
-                                                    syncData();
-                                                });
-                                                orderInput.addEventListener('input', function () {
-                                                    customFields[idx].order = parseInt(this.value) || 99;
-                                                    syncData();
-                                                });
-                                                removeBtn.addEventListener('click', function () {
-                                                    if (confirm('Are you sure you want to remove this custom field?')) {
-                                                        customFields.splice(idx, 1);
-                                                        renderFields();
-                                                    }
-                                                });
-                                            })(index);
-
-                                            container.appendChild(div);
-                                        });
-                                        syncData();
-                                    }
-
-                                    btn.addEventListener('click', function () {
-                                        customFields.push({
-                                            id: 'custom_' + Date.now().toString(36),
-                                            label: '',
-                                            required: false,
-                                            order: 99
-                                        });
-                                        renderFields();
-                                    });
-
-                                    form.addEventListener('submit', function () {
-                                        syncData();
-                                    });
-
-                                    renderFields();
-                                })();
+                                });
+                                /* Event delegation - Input changes */
+                                document.addEventListener('input',function(e){
+                                    var row=e.target.closest('.xep-cf-row');if(!row)return;
+                                    var id=row.getAttribute('data-cf-id');
+                                    var f=CF.find(function(x){return String(x.id)===String(id);});if(!f)return;
+                                    if(e.target.classList.contains('xep-cf-label')){f.label=e.target.value;save();}
+                                    if(e.target.classList.contains('xep-cf-order')){f.order=parseInt(e.target.value,10)||1;save();}
+                                });
+                                /* Event delegation - Checkbox/Radio changes */
+                                document.addEventListener('change',function(e){
+                                    var row=e.target.closest('.xep-cf-row');if(!row)return;
+                                    var id=row.getAttribute('data-cf-id');
+                                    var f=CF.find(function(x){return String(x.id)===String(id);});if(!f)return;
+                                    if(e.target.classList.contains('xep-cf-required')){f.required=e.target.checked;save();}
+                                    if(e.target.classList.contains('xep-cf-width')){f.width=e.target.value;save();}
+                                });
+                            })();
                             </script>
+                        </div>
+                    </div>
+
+                    <!-- Tab: AliSync Helper -->
+                    <div id="tab-alisync" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3 style="color: var(--admin-primary);"><i class="fas fa-sync-alt"></i> AliSync Helper <span style="font-size: 14px; font-weight: normal; opacity: 0.9;">— Stock &amp; price update</span></h3>
+                            <p class="description" style="margin-bottom: 25px;">Sync and manage products from AliExpress. Import listings, <strong>update prices and stock</strong>, and keep your catalog in sync.</p>
+                            <p style="margin-bottom: 20px;">
+                                <a href="<?php echo esc_url(admin_url('admin.php?page=ali-sync-helper')); ?>" class="xep-save-btn" style="display: inline-flex; align-items: center; gap: 10px; padding: 12px 24px; font-size: 14px;">
+                                    <i class="fas fa-external-link-alt"></i> Open AliSync Helper Dashboard
+                                </a>
+                            </p>
+                            <p class="description" style="margin: 0;">Opens the AliSync Helper page in the same window. Install or activate the <strong>AliSync Helper</strong> module from Theme Modules if the link does not work.</p>
                         </div>
                     </div>
 
@@ -2536,6 +3460,71 @@ function xepmarket2_settings_page()
                         </div>
                     </div>
 
+                    <!-- Tab: Telegram Bot -->
+                    <div id="tab-telegram" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3 style="color: var(--admin-primary);"><i class="dashicons dashicons-format-chat"></i> Telegram Order Notifications</h3>
+                            <p class="description" style="margin-bottom: 25px;">Send WooCommerce order and status updates to a Telegram chat. Get the bot token from <a href="https://t.me/BotFather" target="_blank" rel="noopener" style="color: var(--admin-primary);">@BotFather</a>.</p>
+
+                            <div class="xep-form-group" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--admin-border);">
+                                <div>
+                                    <h4 style="margin: 0 0 5px 0;">Enable Telegram Bot</h4>
+                                    <p class="description" style="margin: 0;">Turn notifications on or off.</p>
+                                </div>
+                                <label style="display: inline-flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="hidden" name="xep_tg_bot_enabled" value="no">
+                                    <input type="checkbox" name="xep_tg_bot_enabled" value="yes" <?php checked(get_option('xep_tg_bot_enabled'), 'yes'); ?>>
+                                    <span>Active</span>
+                                </label>
+                            </div>
+
+                            <div class="xep-form-group">
+                                <label>Bot Token</label>
+                                <input type="text" name="xep_tg_bot_token" class="xep-form-control"
+                                    value="<?php echo esc_attr(get_option('xep_tg_bot_token')); ?>"
+                                    placeholder="1234567890:ABCdefGhIJKlmNoPQRsTUVWxyz">
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Chat ID</label>
+                                <input type="text" name="xep_tg_bot_chat_id" class="xep-form-control"
+                                    value="<?php echo esc_attr(get_option('xep_tg_bot_chat_id')); ?>"
+                                    placeholder="-1001234567890 or your user ID">
+                                <p class="description" style="margin-top: 5px;">Group, channel, or user ID to receive messages.</p>
+                            </div>
+
+                            <h4 style="margin-top: 30px; margin-bottom: 15px;">Message Templates</h4>
+                            <p class="description" style="margin-bottom: 15px;">Use: <code>{order_id}</code> <code>{status}</code> <code>{total}</code> <code>{customer_name}</code> <code>{telegram_username}</code> <code>{items}</code>. HTML like &lt;b&gt; is supported.</p>
+                            <div class="xep-form-group">
+                                <label>New order message</label>
+                                <textarea name="xep_tg_bot_msg_new_order" class="xep-form-control" rows="5" style="resize: vertical;"><?php echo esc_textarea(get_option('xep_tg_bot_msg_new_order', "🛒 <b>NEW ORDER</b>\n\n<b>Order:</b> #{order_id}\n<b>Customer:</b> {customer_name}\n<b>Total:</b> {total}\n<b>Items:</b>\n{items}")); ?></textarea>
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Status changed message</label>
+                                <textarea name="xep_tg_bot_msg_status_changed" class="xep-form-control" rows="4" style="resize: vertical;"><?php echo esc_textarea(get_option('xep_tg_bot_msg_status_changed', "🔄 <b>ORDER #{order_id}</b> → {status}\n<b>Customer:</b> {customer_name}\n<b>Total:</b> {total}")); ?></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Affiliate -->
+                    <div id="tab-affiliate" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3 style="color: var(--admin-primary);"><i class="fas fa-handshake"></i> Affiliate System</h3>
+                            <p class="description" style="margin-bottom: 25px;">Referral commissions for completed orders. Users get a unique link from My Account → Affiliate Dashboard. Full list and "Mark as paid": <a href="<?php echo esc_url(admin_url('admin.php?page=xepmarket2-affiliate')); ?>">WooCommerce → Affiliates</a>.</p>
+                            <div class="xep-form-group">
+                                <label>Commission rate (%)</label>
+                                <input type="number" step="0.01" min="0" max="100" name="omnixep_affiliate_rate"
+                                    value="<?php echo esc_attr(get_option('omnixep_affiliate_rate', 10)); ?>">
+                                <p class="description">Percentage of order subtotal granted to the affiliate when the order is completed.</p>
+                            </div>
+                            <div class="xep-form-group">
+                                <label>Cookie duration (days)</label>
+                                <input type="number" min="1" name="omnixep_affiliate_cookie_days"
+                                    value="<?php echo esc_attr(get_option('omnixep_affiliate_cookie_days', 30)); ?>">
+                                <p class="description">How long the referral link stays attributed to the affiliate.</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Tab: SEO -->
                     <?php if (function_exists('xepmarket2_seo_settings_tab_content'))
                         xepmarket2_seo_settings_tab_content(); ?>
@@ -2555,9 +3544,8 @@ function xepmarket2_settings_page()
                                     <i class="fas fa-rocket"></i>
                                 </div>
                                 <h3 style="margin-bottom: 15px;">Automated Store Installation</h3>
-                                <p style="max-width: 500px; margin: 0 auto 35px; opacity: 0.8; line-height: 1.6;">Ready to
-                                    build your crypto merchandise empire? Clicking below will generate your Home, Shop, and
-                                    Swap pages, configure the navigation menu, and apply premium theme defaults.</p>
+                                <p style="max-width: 500px; margin: 0 auto 35px; opacity: 0.8; line-height: 1.6;">Creates
+                                    missing Home, Shop, Swap and WooCommerce pages and sets up the menu. <strong>Your current theme settings are not changed.</strong></p>
 
                                 <button type="button" id="xep-run-demo-import" class="xep-save-btn"
                                     style="padding: 15px 45px; font-size: 16px; width: auto !important; cursor: pointer; background: linear-gradient(135deg, var(--admin-primary), #00d2ff) !important; box-shadow: 0 10px 25px rgba(0, 242, 255, 0.2) !important;">
@@ -2583,14 +3571,15 @@ function xepmarket2_settings_page()
                                         <i class="fas fa-trash-alt"></i>
                                     </div>
                                     <div style="flex: 1;">
-                                        <h4 style="color: #ff453a; margin-bottom: 5px;">Factory Reset Theme</h4>
-                                        <p style="font-size: 13px; opacity: 0.7; margin-bottom: 15px;">Wipe all
-                                            theme-specific settings, logos, and custom menus back to their original state.
-                                            <strong>This action cannot be undone.</strong>
+                                        <h4 style="color: #ff453a; margin-bottom: 5px;">Reset to current state</h4>
+                                        <p style="font-size: 13px; opacity: 0.7; margin-bottom: 15px;">Restore theme settings and menus to the last <strong>saved state</strong>. Save your current setup first with the button below, then use this to revert after changes.</p>
+                                        <p style="font-size: 12px; opacity: 0.6; margin-bottom: 12px;">
+                                            <button type="button" id="xep-save-current-state" class="button" style="margin-right: 8px;">Save current state</button>
+                                            <span id="xep-save-state-status"></span>
                                         </p>
                                         <button type="button" id="xep-factory-reset" class="xep-save-btn"
-                                            style="background: linear-gradient(135deg, #ff453a, #d32f2f) !important; width: auto !important; padding: 10px 25px !important; font-size: 12px !important;">WIPE
-                                            & RESET EVERYTHING</button>
+                                            style="background: linear-gradient(135deg, #ff453a, #d32f2f) !important; width: auto !important; padding: 10px 25px !important; font-size: 12px !important;">RESTORE
+                                            TO SAVED STATE</button>
                                     </div>
                                 </div>
                             </div>
@@ -2601,9 +3590,9 @@ function xepmarket2_settings_page()
                                 </h4>
                                 <ul style="margin: 0; padding-left: 20px; font-size: 13px; opacity: 0.7; line-height: 1.8;">
                                     <li>Existing posts, products and pages will <strong>not</strong> be modified.</li>
-                                    <li>New pages (Home, Shop, Swap) will be created if they don't exist.</li>
-                                    <li>Theme settings will be updated to match the premium demo defaults.</li>
-                                    <li>Navigation menus will be automatically assigned to their respective positions.</li>
+                                    <li><strong>Install</strong>: Only creates missing pages and menu; theme settings stay as they are.</li>
+                                    <li><strong>Reset</strong>: Restores theme settings to the last &quot;Save current state&quot; snapshot.</li>
+                                    <li>Use &quot;Save current state&quot; before making big changes, then &quot;Restore to saved state&quot; to go back.</li>
                                 </ul>
                             </div>
                         </div>
@@ -2659,9 +3648,83 @@ function xepmarket2_settings_page()
                 $('#xep-settings-form').submit();
             });
 
+            // ── AJAX: GitHub Plugins Sync ──
+            $('#xep-github-sync-btn').on('click', function () {
+                var $btn = $(this);
+                var nonce = $btn.data('nonce');
+                if (!nonce) return;
+                if (!confirm('Download all plugins from GitHub (PlanC90/plugins) and copy to wp-content/plugins? Existing folders will be updated.')) return;
+                $btn.prop('disabled', true).find('.btn-text').text('Syncing...');
+                $btn.find('i').removeClass('fa-github').addClass('fa-spinner fa-spin');
+                $.ajax({
+                    url: typeof ajaxurl !== 'undefined' ? ajaxurl : (typeof xep_admin !== 'undefined' ? xep_admin.ajax_url : ''),
+                    type: 'POST',
+                    data: { action: 'xepmarket2_github_plugins_sync', nonce: nonce },
+                    success: function (res) {
+                        if (res.success && res.data) {
+                            var d = res.data;
+                            var msg = [];
+                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.length + ' plugin(s)');
+                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.length + ' plugin(s)');
+                            if (d.errors && d.errors.length) msg.push('Errors: ' + d.errors.join('; '));
+                            var text = msg.length ? msg.join(' • ') : 'Sync completed.';
+                            alert(text + '\n\nRefreshing page...');
+                            window.location.reload();
+                        } else {
+                            alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown'));
+                            $btn.prop('disabled', false).find('.btn-text').text('Sync from GitHub');
+                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-github');
+                        }
+                    },
+                    error: function (xhr) {
+                        var errMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) ? xhr.responseJSON.data.message : xhr.statusText;
+                        alert('Request failed: ' + errMsg);
+                        $btn.prop('disabled', false).find('.btn-text').text('Sync from GitHub');
+                        $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-github');
+                    }
+                });
+            });
+
+            // ── Install all required modules (same as GitHub sync, from PlanC90/plugins) ──
+            $('#xep-install-all-modules-btn').on('click', function () {
+                var $btn = $(this);
+                var nonce = $btn.data('nonce');
+                if (!nonce) return;
+                if (!confirm('Download all plugins from GitHub (PlanC90/plugins) and install them into wp-content/plugins? Existing folders will be updated.')) return;
+                $btn.prop('disabled', true).find('.btn-text').text('Installing...');
+                $btn.find('i').removeClass('fa-download').addClass('fa-spinner fa-spin');
+                $.ajax({
+                    url: typeof ajaxurl !== 'undefined' ? ajaxurl : (typeof xep_admin !== 'undefined' ? xep_admin.ajax_url : ''),
+                    type: 'POST',
+                    data: { action: 'xepmarket2_github_plugins_sync', nonce: nonce },
+                    success: function (res) {
+                        if (res.success && res.data) {
+                            var d = res.data;
+                            var msg = [];
+                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.length + ' plugin(s)');
+                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.length + ' plugin(s)');
+                            if (d.errors && d.errors.length) msg.push('Errors: ' + d.errors.join('; '));
+                            var text = msg.length ? msg.join(' • ') : 'All modules installed.';
+                            alert(text + '\n\nRefreshing page...');
+                            window.location.reload();
+                        } else {
+                            alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown'));
+                            $btn.prop('disabled', false).find('.btn-text').text('Install all required modules');
+                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-download');
+                        }
+                    },
+                    error: function (xhr) {
+                        var errMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) ? xhr.responseJSON.data.message : xhr.statusText;
+                        alert('Request failed: ' + errMsg);
+                        $btn.prop('disabled', false).find('.btn-text').text('Install all required modules');
+                        $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-download');
+                    }
+                });
+            });
+
             // ── AJAX: Demo Import ──
             $('#xep-run-demo-import').on('click', function () {
-                if (!confirm('Run One-Click Setup? This will create essential pages and apply demo defaults.')) return;
+                if (!confirm('Run setup? This will only add missing pages and menu; your theme settings will not change.')) return;
 
                 var $btn = $(this);
                 var $status = $('#xep-demo-status');
@@ -2697,13 +3760,12 @@ function xepmarket2_settings_page()
 
             // ── AJAX: Factory Reset ──
             $('#xep-factory-reset').on('click', function () {
-                if (!confirm('⚠️ CRITICAL: Are you sure? This will wipe ALL theme settings and cannot be undone.')) return;
-                if (!confirm('Second Confirmation: Wipe all data?')) return;
+                if (!confirm('Restore theme settings and menus to the last saved state?')) return;
 
                 var $btn = $(this);
                 var nonce = $('#xep_admin_ajax_nonce').val();
 
-                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> WIPING DATA...');
+                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> RESTORING...');
 
                 $.ajax({
                     url: ajaxurl,
@@ -2711,12 +3773,42 @@ function xepmarket2_settings_page()
                     data: { action: 'xep_factory_reset', nonce: nonce },
                     success: function (response) {
                         if (response.success) {
-                            alert('Factory reset successful. The page will now reload.');
+                            alert(response.data || 'Restored. Reloading...');
                             window.location.reload();
                         } else {
-                            alert('Error: ' + response.data);
-                            $btn.prop('disabled', false).text('WIPE & RESET EVERYTHING');
+                            alert(response.data || 'Error: No saved state. Click "Save current state" first.');
+                            $btn.prop('disabled', false).html('RESTORE TO SAVED STATE');
                         }
+                    },
+                    error: function () {
+                        alert('Request failed.');
+                        $btn.prop('disabled', false).html('RESTORE TO SAVED STATE');
+                    }
+                });
+            });
+
+            // ── AJAX: Save current state ──
+            $('#xep-save-current-state').on('click', function () {
+                var $btn = $(this);
+                var $status = $('#xep-save-state-status');
+                var nonce = $('#xep_admin_ajax_nonce').val();
+                $btn.prop('disabled', true);
+                $status.text('Saving...').css('color', '');
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: { action: 'xep_save_current_state', nonce: nonce },
+                    success: function (response) {
+                        if (response.success) {
+                            $status.text('Saved.').css('color', '#32d74b');
+                        } else {
+                            $status.text('Error.').css('color', '#ff453a');
+                        }
+                        $btn.prop('disabled', false);
+                    },
+                    error: function () {
+                        $status.text('Error.').css('color', '#ff453a');
+                        $btn.prop('disabled', false);
                     }
                 });
             });
@@ -2779,7 +3871,7 @@ add_filter('woocommerce_output_related_products_args', function ($args) {
 // Temporarily disabled to debug memory exhaustion
 /*
 add_filter('gettext', function ($translated, $text, $domain) {
-    if ($text === 'Related products' || $text === 'İlgili ürünler') {
+    if ($text === 'Related products' || $text === 'Related items') {
         return 'Related Products';
     }
     return $translated;
@@ -2882,7 +3974,7 @@ add_action('init', function () {
  */
 
 add_filter('woocommerce_add_success', function ($message) {
-    if (strpos($message, 'Cart updated') !== false || strpos($message, 'Sepet güncellendi') !== false) {
+    if (strpos($message, 'Cart updated') !== false) {
         return false;
     }
     return $message;
@@ -2903,8 +3995,290 @@ add_filter('pre_option_woocommerce_cart_redirect_after_add', function () {
  * Remove "Cart updated" notice
  */
 add_filter('woocommerce_add_success', function ($message) {
-    if (strpos($message, 'Cart updated') !== false || strpos($message, 'Sepet güncellendi') !== false) {
+    if (strpos($message, 'Cart updated') !== false) {
         return false;
     }
     return $message;
 }, 10, 1);
+
+/**
+ * Filter WooCommerce Countries based on Shipping Limits set in Theme Panel
+ */
+add_filter('woocommerce_countries', 'xepmarket2_filter_excluded_shipping_countries', 99, 1);
+add_filter('woocommerce_shipping_countries', 'xepmarket2_filter_excluded_shipping_countries', 99, 1);
+function xepmarket2_filter_excluded_shipping_countries($countries) {
+    if (is_admin() && !wp_doing_ajax()) return $countries; // Allow admin to see all countries
+
+    $excluded_countries = get_option('xepmarket2_shipping_excluded_countries', array());
+    if (!empty($excluded_countries) && is_array($excluded_countries)) {
+        foreach ($excluded_countries as $code) {
+            if (isset($countries[$code])) {
+                unset($countries[$code]);
+            }
+        }
+    }
+    return $countries;
+}
+
+/**
+ * Country-Based Shipping Rates defined in Theme Settings
+ */
+add_filter('woocommerce_package_rates', 'xepmarket2_apply_custom_shipping_rates', 100, 2);
+function xepmarket2_apply_custom_shipping_rates($rates, $package) {
+    if (is_admin() && !wp_doing_ajax()) {
+        return $rates;
+    }
+
+    $customer_country = isset($package['destination']['country']) ? $package['destination']['country'] : '';
+    if (empty($customer_country)) {
+        return $rates; // Cannot determine country yet
+    }
+
+    // Check custom zones
+    $zones_json = get_option('xepmarket2_shipping_zones', '[]');
+    $zones = json_decode($zones_json, true);
+    
+    $shipping_cost = false;
+    $shipping_label = 'Standard Shipping';
+    
+    if (is_array($zones)) {
+        foreach ($zones as $zone) {
+            if (!empty($zone['countries']) && is_array($zone['countries']) && in_array($customer_country, $zone['countries'])) {
+                $shipping_cost = floatval($zone['cost']);
+                $shipping_label = !empty($zone['name']) ? $zone['name'] : 'Zone Shipping';
+                break;
+            }
+        }
+    }
+    
+    // Fallback to base cost if no zone matches
+    if ($shipping_cost === false) {
+        $base_cost = get_option('xepmarket2_shipping_base_cost', '0');
+        if ($base_cost !== '') {
+            $shipping_cost = floatval($base_cost);
+            $shipping_label = $shipping_cost == 0 ? __('Free Shipping', 'xepmarket2') : __('International Shipping', 'xepmarket2');
+        } else {
+            return $rates;
+        }
+    }
+
+    // Create the custom shipping rate
+    $rate_id = 'xepmarket2_custom_rate';
+    $taxes = array();
+    
+    $new_rate = new WC_Shipping_Rate(
+        $rate_id,
+        $shipping_label,
+        $shipping_cost,
+        $taxes,
+        'xepmarket2_shipping'
+    );
+    
+    // Wipe existing rates and force our custom rule
+    return array($rate_id => $new_rate);
+}
+
+
+
+/**
+ * Enhanced Checkout UX - Create Account & Password Strength
+ */
+add_action('wp_footer', 'xepmarket2_enhanced_checkout_ux');
+function xepmarket2_enhanced_checkout_ux() {
+    if (!is_checkout() || is_wc_endpoint_url('order-received')) {
+        return;
+    }
+    ?>
+    <style>
+        /* Make "Create an account?" more prominent */
+        .woocommerce-form__label-for-checkbox.create-account {
+            background: rgba(0, 242, 255, 0.05) !important;
+            border: 1px solid rgba(0, 242, 255, 0.2) !important;
+            border-radius: 15px !important;
+            padding: 20px !important;
+            margin: 20px 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            cursor: pointer !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .woocommerce-form__label-for-checkbox.create-account:hover {
+            background: rgba(0, 242, 255, 0.08) !important;
+            border-color: rgba(0, 242, 255, 0.4) !important;
+        }
+        
+        .woocommerce-form__label-for-checkbox.create-account input[type="checkbox"] {
+            width: 20px !important;
+            height: 20px !important;
+            margin: 0 !important;
+            cursor: pointer !important;
+            flex-shrink: 0 !important;
+        }
+        
+        .woocommerce-form__label-for-checkbox.create-account span {
+            font-size: 16px !important;
+            font-weight: 600 !important;
+            color: #00f2ff !important;
+            flex: 1 !important;
+        }
+        
+        /* Password strength indicator */
+        .xep-password-strength-wrapper {
+            margin-top: 10px;
+            display: none;
+        }
+        
+        .xep-password-strength-wrapper.active {
+            display: block;
+        }
+        
+        .xep-password-strength-bar {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        
+        .xep-password-strength-fill {
+            height: 100%;
+            width: 0%;
+            transition: all 0.3s ease;
+            border-radius: 3px;
+        }
+        
+        .xep-password-strength-fill.weak {
+            width: 33%;
+            background: #ff453a;
+        }
+        
+        .xep-password-strength-fill.medium {
+            width: 66%;
+            background: #ff9f0a;
+        }
+        
+        .xep-password-strength-fill.strong {
+            width: 100%;
+            background: #30d158;
+        }
+        
+        .xep-password-strength-text {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .xep-password-strength-text.weak {
+            color: #ff453a;
+        }
+        
+        .xep-password-strength-text.medium {
+            color: #ff9f0a;
+        }
+        
+        .xep-password-strength-text.strong {
+            color: #30d158;
+        }
+        
+        .xep-password-requirements {
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        
+        .xep-password-req {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255, 255, 255, 0.5);
+            transition: color 0.3s ease;
+        }
+        
+        .xep-password-req.met {
+            color: #30d158;
+        }
+        
+        .xep-password-req i {
+            width: 16px;
+            font-size: 12px;
+        }
+    </style>
+    
+    <script>
+    (function($) {
+        $(document).ready(function() {
+            // Add password strength indicator
+            var $passwordField = $('#account_password');
+            if ($passwordField.length) {
+                var strengthHTML = '<div class="xep-password-strength-wrapper">' +
+                    '<div class="xep-password-strength-bar">' +
+                        '<div class="xep-password-strength-fill"></div>' +
+                    '</div>' +
+                    '<div class="xep-password-strength-text"></div>' +
+                    '<div class="xep-password-requirements">' +
+                        '<div class="xep-password-req" data-req="length"><i class="fas fa-circle"></i> At least 8 characters</div>' +
+                        '<div class="xep-password-req" data-req="uppercase"><i class="fas fa-circle"></i> At least 1 uppercase letter</div>' +
+                        '<div class="xep-password-req" data-req="lowercase"><i class="fas fa-circle"></i> At least 1 lowercase letter</div>' +
+                        '<div class="xep-password-req" data-req="number"><i class="fas fa-circle"></i> At least 1 number</div>' +
+                    '</div>' +
+                '</div>';
+                
+                $passwordField.after(strengthHTML);
+                
+                var $wrapper = $passwordField.next('.xep-password-strength-wrapper');
+                var $fill = $wrapper.find('.xep-password-strength-fill');
+                var $text = $wrapper.find('.xep-password-strength-text');
+                
+                $passwordField.on('input', function() {
+                    var password = $(this).val();
+                    
+                    if (password.length === 0) {
+                        $wrapper.removeClass('active');
+                        return;
+                    }
+                    
+                    $wrapper.addClass('active');
+                    
+                    // Check requirements
+                    var hasLength = password.length >= 8;
+                    var hasUppercase = /[A-Z]/.test(password);
+                    var hasLowercase = /[a-z]/.test(password);
+                    var hasNumber = /[0-9]/.test(password);
+                    
+                    // Update requirement indicators
+                    $wrapper.find('[data-req="length"]').toggleClass('met', hasLength);
+                    $wrapper.find('[data-req="uppercase"]').toggleClass('met', hasUppercase);
+                    $wrapper.find('[data-req="lowercase"]').toggleClass('met', hasLowercase);
+                    $wrapper.find('[data-req="number"]').toggleClass('met', hasNumber);
+                    
+                    // Calculate strength
+                    var metCount = [hasLength, hasUppercase, hasLowercase, hasNumber].filter(Boolean).length;
+                    
+                    $fill.removeClass('weak medium strong');
+                    $text.removeClass('weak medium strong');
+                    
+                    if (metCount <= 2) {
+                        $fill.addClass('weak');
+                        $text.addClass('weak').html('<i class="fas fa-exclamation-triangle"></i> Weak password');
+                    } else if (metCount === 3) {
+                        $fill.addClass('medium');
+                        $text.addClass('medium').html('<i class="fas fa-check-circle"></i> Medium password');
+                    } else {
+                        $fill.addClass('strong');
+                        $text.addClass('strong').html('<i class="fas fa-shield-alt"></i> Strong password');
+                    }
+                });
+            }
+        });
+    })(jQuery);
+    </script>
+    <?php
+}
+

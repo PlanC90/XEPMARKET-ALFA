@@ -255,7 +255,7 @@ function xepmarket2_output_seo_tags()
                 $og_image = $og_image ?: $product_img;
             }
         }
-    } elseif (is_product_category()) {
+    } elseif (function_exists('is_product_category') && is_product_category()) {
         $term = get_queried_object();
         if ($term) {
             $page_desc = $term->description ?: 'Shop ' . $term->name . ' on ' . $biz_name . '. ' . $slogan;
@@ -539,7 +539,7 @@ function xepmarket2_get_canonical_url()
     if (is_front_page()) return home_url('/');
     if (is_singular()) return get_permalink();
     if (is_tax() || is_category() || is_tag()) return get_term_link(get_queried_object());
-    if (function_exists('is_shop') && is_shop()) return get_permalink(wc_get_page_id('shop'));
+    if (function_exists('is_shop') && is_shop() && function_exists('wc_get_page_id')) return get_permalink(wc_get_page_id('shop'));
     return home_url(add_query_arg([], $GLOBALS['wp']->request));
 }
 
@@ -549,15 +549,17 @@ function xepmarket2_build_breadcrumbs()
     $pos = 1;
     $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => "Home", "item" => home_url('/')];
 
-    if (function_exists('is_shop') && is_shop()) {
+    if (function_exists('is_shop') && is_shop() && function_exists('wc_get_page_id')) {
         $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => "Shop", "item" => get_permalink(wc_get_page_id('shop'))];
-    } elseif (is_product_category()) {
+    } elseif (function_exists('is_product_category') && is_product_category() && function_exists('wc_get_page_id')) {
         $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => "Shop", "item" => get_permalink(wc_get_page_id('shop'))];
         $term = get_queried_object();
         if ($term) $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => $term->name, "item" => get_term_link($term)];
     } elseif (is_singular('product')) {
         global $post;
-        $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => "Shop", "item" => get_permalink(wc_get_page_id('shop'))];
+        if (function_exists('wc_get_page_id')) {
+            $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => "Shop", "item" => get_permalink(wc_get_page_id('shop'))];
+        }
         $terms = get_the_terms($post->ID, 'product_cat');
         if ($terms && !is_wp_error($terms)) {
             $items[] = ["@type" => "ListItem", "position" => $pos++, "name" => $terms[0]->name, "item" => get_term_link($terms[0])];

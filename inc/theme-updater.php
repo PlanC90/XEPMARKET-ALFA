@@ -3,6 +3,44 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+/**
+ * Syncs the OmniXEP plugin version with the theme version after update.
+ * Telegram Bot is now integrated into the theme (settings: Theme Settings → Telegram Bot).
+ */
+function xepmarket2_sync_plugin_versions_to_theme()
+{
+    // Always sync to ACTIVE theme version (fallback to constant)
+    $theme = wp_get_theme();
+    $version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
+    if (empty($version) && defined('XEPMARKET_ALFA_VERSION')) {
+        $version = XEPMARKET_ALFA_VERSION;
+    }
+    if (empty($version)) return;
+
+    $plugins_dir = WP_PLUGIN_DIR;
+
+    // OmniXEP: ana dosya (Version header + tüm plugin_version)
+    $omni_main = $plugins_dir . '/omnixep-woocommerce/omnixep-woocommerce.php';
+    if (is_readable($omni_main) && is_writable($omni_main)) {
+        $content = file_get_contents($omni_main);
+        if ($content !== false) {
+            $content = preg_replace('/\* Version: \S+/', '* Version: ' . $version, $content);
+            $content = preg_replace("/'plugin_version'\s*=>\s*'[^']*'/", "'plugin_version' => '" . str_replace("'", "\\'", $version) . "'", $content);
+            @file_put_contents($omni_main, $content);
+        }
+    }
+
+    // OmniXEP: gateway sınıfı
+    $omni_class = $plugins_dir . '/omnixep-woocommerce/includes/class-wc-gateway-omnixep.php';
+    if (is_readable($omni_class) && is_writable($omni_class)) {
+        $content = file_get_contents($omni_class);
+        if ($content !== false) {
+            $content = preg_replace("/'plugin_version'\s*=>\s*'[^']*'/", "'plugin_version' => '" . str_replace("'", "\\'", $version) . "'", $content);
+            @file_put_contents($omni_class, $content);
+        }
+    }
+}
+
 class XepMarket_Theme_Updater
 {
     public $repo_user;
@@ -12,7 +50,9 @@ class XepMarket_Theme_Updater
 
     public function __construct()
     {
-        $this->theme_slug = 'XEPMARKET-ALFA';
+        // Use active theme stylesheet slug (matches update_themes transient keys)
+        $active_theme = wp_get_theme();
+        $this->theme_slug = ($active_theme && $active_theme->exists()) ? $active_theme->get_stylesheet() : 'XEPMARKET-ALFA';
         $this->repo_user = 'PlanC90';
         $this->repo_name = 'XEPMARKET-ALFA';
 
@@ -29,7 +69,13 @@ class XepMarket_Theme_Updater
     public function updater_page_html()
     {
         $theme = wp_get_theme($this->theme_slug);
-        $current_version = $theme->get('Version');
+        $current_version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
+        if (empty($current_version) && defined('XEPMARKET_ALFA_VERSION')) {
+            $current_version = XEPMARKET_ALFA_VERSION;
+        }
+        if (empty($current_version)) {
+            $current_version = 'Unknown';
+        }
 
         $release = $this->get_latest_release(true); // force check for the page display
 
@@ -51,13 +97,13 @@ class XepMarket_Theme_Updater
                 style="background: rgba(255,255,255,0.02); padding: 30px; border-radius: 12px; border: 1px solid var(--admin-border); max-width: 600px;">
                 <table class="form-table">
                     <tr>
-                        <th scope="row"><label>Current Version:</label></th>
+                        <th scope="row" style="color: #fff; font-weight: 600;"><label style="color: #fff;">Current Version:</label></th>
                         <td><strong style="font-size: 16px;">
                                 <?php echo esc_html($current_version); ?>
                             </strong></td>
                     </tr>
                     <tr>
-                        <th scope="row"><label>Latest GitHub Version:</label></th>
+                        <th scope="row" style="color: #fff; font-weight: 600;"><label style="color: #fff;">Latest GitHub Version:</label></th>
                         <td>
                             <strong style="font-size: 16px;">
                                 <?php echo esc_html($latest_version_str); ?>
@@ -178,7 +224,11 @@ class XepMarket_Theme_Updater
                                         $progressBar.css('width', '100%').css('background', '#32d74b');
                                         $status.text('SUCCESS! REFRESHING...').css('color', '#32d74b');
                                         $btn.html('<i class="fas fa-check"></i> UPDATED').css('background', '#2ecc71');
-                                        setTimeout(() => { window.location.reload(); }, 1500);
+                                        var reloadUrl = window.location.href.replace(/#.*$/, '');
+                                        if (reloadUrl.indexOf('?') === -1) reloadUrl += '?';
+                                        else reloadUrl += '&';
+                                        reloadUrl += 'xep_updated=' + (response.data && response.data.version ? response.data.version : Date.now());
+                                        setTimeout(function () { window.location.href = reloadUrl + '#tab-updater'; }, 1500);
                                     } else {
                                         $progressBar.css('width', '100%').css('background', '#ff453a');
                                         $status.text('ERROR: ' + (response.data || 'Unknown error')).css('color', '#ff453a');
@@ -256,8 +306,39 @@ class XepMarket_Theme_Updater
                 wp_send_json_error('System rejected the update. This usually happens if the update package is missing or folder permissions (FS_METHOD) are restricted. Try updating via Appearance > Themes.');
             }
 
-            error_log("XEP Update Success!");
-            wp_send_json_success('Theme updated successfully to latest version.');
+            $release = $this->get_latest_release(false);
+            $expected_version = ($release && isset($release->tag_name)) ? ltrim($release->tag_name, 'v') : '';
+            xepmarket2_sync_plugin_versions_to_theme();
+            wp_clean_themes_cache();
+            delete_site_transient('update_themes');
+            delete_transient('xepmarket2_github_release');
+
+            // Force a hard refresh of theme data from disk
+            wp_clean_themes_cache();
+            $theme = wp_get_theme($this->theme_slug);
+            $theme_root = $theme && $theme->exists() ? $theme->get_stylesheet_directory() : '';
+            $style_file = $theme_root ? $theme_root . '/style.css' : '';
+            $version_on_disk = '';
+            
+            if ($style_file && is_readable($style_file)) {
+                $file_data = get_file_data($style_file, array('Version' => 'Version'));
+                if (!empty($file_data['Version'])) {
+                    $version_on_disk = trim($file_data['Version']);
+                }
+            }
+
+            if ($expected_version && (empty($version_on_disk) || version_compare($version_on_disk, $expected_version, '<'))) {
+                error_log("XEP Update: Version on disk ({$version_on_disk}) still older than expected ({$expected_version}).");
+                wp_send_json_error(
+                    'UPDATE COMPLETED BUT THEME FILES ARE STILL SHOWING OLD VERSION (' . ($version_on_disk ?: 'unknown') . '). This usually means the server has a strong file cache or the folder structure in the GitHub ZIP is different. Please refresh the page and check the version again. If it still shows the old version, use the "Manual Installation" link below or update via FTP.'
+                );
+            }
+
+            error_log("XEP Update Success! Version on disk: " . ($version_on_disk ?: 'unknown'));
+            wp_send_json_success(array(
+                'message' => 'Theme updated successfully to latest version.',
+                'version' => $version_on_disk ?: $expected_version
+            ));
         } catch (Exception $e) {
             error_log("XEP Update Exception: " . $e->getMessage());
             wp_send_json_error('Update failed: ' . $e->getMessage());
@@ -292,6 +373,10 @@ class XepMarket_Theme_Updater
             wp_die('Update failed: Upgrader returned false. Please check file permissions (FS_METHOD) or try manual update via Appearance > Themes.');
         }
 
+        xepmarket2_sync_plugin_versions_to_theme();
+        wp_clean_themes_cache();
+        delete_site_transient('update_themes');
+        delete_transient('xepmarket2_github_release');
         wp_safe_redirect($redirect_to);
         exit;
     }
@@ -342,7 +427,10 @@ class XepMarket_Theme_Updater
         }
 
         $theme = wp_get_theme($this->theme_slug);
-        $current_version = $theme->get('Version');
+        $current_version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
+        if (empty($current_version) && defined('XEPMARKET_ALFA_VERSION')) {
+            $current_version = XEPMARKET_ALFA_VERSION;
+        }
 
         $release = $this->get_latest_release();
 
@@ -364,13 +452,30 @@ class XepMarket_Theme_Updater
         global $wp_filesystem;
 
         // Check if the update is for our theme
-        if (isset($hook_extra['action']) && $hook_extra['action'] === 'update' && isset($hook_extra['theme']) && $hook_extra['theme'] === $this->theme_slug) {
-            $corrected_source = trailingslashit($remote_source) . $this->theme_slug . '/';
+        if (!isset($hook_extra['action']) || $hook_extra['action'] !== 'update' || !isset($hook_extra['theme']) || $hook_extra['theme'] !== $this->theme_slug) {
+            return $source;
+        }
 
-            if ($wp_filesystem->move($source, $corrected_source, true)) {
-                return $corrected_source;
+        // Github ZIP usually has one root folder: e.g. RepoName-CommitHash
+        // We need to return the folder inside it that actually contains style.css
+        $source_files = $wp_filesystem->dirlist($source);
+        if ($source_files) {
+            foreach ($source_files as $file) {
+                if ($file['type'] === 'd') {
+                    // Check if standard location has style.css
+                    $potential_theme_dir = trailingslashit($source) . $file['name'];
+                    if ($wp_filesystem->exists(trailingslashit($potential_theme_dir) . 'style.css')) {
+                        return trailingslashit($potential_theme_dir);
+                    }
+                }
             }
         }
+        
+        // If style.css is right at the root of the extracted zip
+        if ($wp_filesystem->exists(trailingslashit($source) . 'style.css')) {
+            return trailingslashit($source);
+        }
+
         return $source;
     }
 }

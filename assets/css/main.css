@@ -406,6 +406,18 @@ h4 {
     color: var(--primary);
 }
 
+.logo-icon {
+    height: 1.3em;
+    width: auto;
+    min-width: 1.3em;
+    max-height: 1.3em;
+    object-fit: contain;
+    display: inline-block;
+    margin-right: 12px;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
 /* Header Navigation */
 /* Header Navigation Dropdowns */
 .main-navigation ul {
@@ -3872,7 +3884,48 @@ a.checkout-button.wc-forward:hover::before {
     border: 1px solid var(--border-glass) !important;
     border-radius: 0 12px 12px 12px !important;
     padding: 40px !important;
-    color: var(--text-muted);
+    color: #e0e0e0 !important;
+}
+
+.woocommerce div.product .woocommerce-tabs .panel *,
+.woocommerce div.product .woocommerce-product-details__short-description,
+.woocommerce div.product .woocommerce-product-details__short-description * {
+    color: #e0e0e0 !important;
+}
+
+.woocommerce div.product .woocommerce-tabs .panel h1,
+.woocommerce div.product .woocommerce-tabs .panel h2,
+.woocommerce div.product .woocommerce-tabs .panel h3,
+.woocommerce div.product .woocommerce-tabs .panel h4,
+.woocommerce div.product .woocommerce-tabs .panel h5,
+.woocommerce div.product .woocommerce-tabs .panel h6,
+.shop-header-content h1,
+.woocommerce-archive-description h1,
+.woocommerce-products-header__title {
+    color: #ffffff !important;
+}
+
+/* Global Description Visibility Fix */
+.woocommerce-product-details__short-description,
+.woocommerce-tabs .panel,
+.term-description,
+.woocommerce-archive-description,
+.product-description,
+.description,
+.entry-content,
+.post-content {
+    color: #e0e0e0 !important;
+}
+
+.woocommerce-product-details__short-description *,
+.woocommerce-tabs .panel *,
+.term-description *,
+.woocommerce-archive-description *,
+.product-description *,
+.description *,
+.entry-content *,
+.post-content * {
+    color: #e0e0e0 !important;
 }
 
 .woocommerce div.product .woocommerce-tabs .panel h2 {
@@ -5502,6 +5555,53 @@ body.menu-open {
     display: none !important;
 }
 
+/* ALPHA ELITE: Shop category filter bar */
+.xep-shop-category-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 10px 0;
+}
+
+.xep-cat-pill {
+    display: inline-block;
+    padding: 8px 18px;
+    border-radius: 50px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-glass);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    transition: var(--transition-smooth);
+}
+
+.xep-cat-pill:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.xep-cat-pill.active {
+    background: var(--primary);
+    color: #000;
+    border-color: var(--primary);
+    box-shadow: 0 0 15px rgba(var(--primary-rgb), 0.3);
+}
+
+@media (max-width: 768px) {
+    .xep-shop-category-bar {
+        justify-content: center;
+        margin-bottom: 16px;
+    }
+    .xep-cat-pill {
+        padding: 6px 14px;
+        font-size: 12px;
+    }
+}
+
 /* Sorting & Results */
 .woocommerce-result-count {
     color: var(--text-muted);
@@ -5527,6 +5627,11 @@ body.menu-open {
     font-weight: 600 !important;
     cursor: pointer !important;
     outline: none !important;
+}
+
+.woocommerce-ordering select option {
+    background: #fff !important;
+    color: #1a1a1a !important;
 }
 
 /* Product Grid Modernization */
@@ -7249,6 +7354,11 @@ button.wc-block-cart-item__remove-link {
     font-size: 14px !important;
 }
 
+.woocommerce .woocommerce-ordering select option {
+    background: #fff !important;
+    color: #1a1a1a !important;
+}
+
 /* Breadcrumb */
 .woocommerce-breadcrumb {
     color: var(--text-muted) !important;
@@ -8499,6 +8609,7 @@ body.search-open {
     scroll-snap-align: start !important;
 }
 
+/* Tablet: 3 ürün (1024px altı, mobil değil) */
 @media (max-width: 1024px) {
     .sale-carousel-wrapper ul.products>li.product {
         flex: 0 0 calc(33.333% - 14px) !important;
@@ -8506,17 +8617,16 @@ body.search-open {
     }
 }
 
+/* Mobil: tek ürün ortalanmış + sağ/sol oklar (768px altı) */
 @media (max-width: 768px) {
-    .sale-carousel-wrapper ul.products>li.product {
-        flex: 0 0 calc(50% - 10px) !important;
-        max-width: calc(50% - 10px) !important;
+    .sale-carousel-wrapper ul.products {
+        padding-left: 5% !important;
+        padding-right: 5% !important;
+        justify-content: flex-start !important;
     }
-}
-
-@media (max-width: 576px) {
     .sale-carousel-wrapper ul.products>li.product {
-        flex: 0 0 100% !important;
-        max-width: 100% !important;
+        flex: 0 0 90% !important;
+        max-width: 90% !important;
         scroll-snap-align: center !important;
     }
 }
@@ -8565,4 +8675,34 @@ body.search-open {
         letter-spacing: 0.5px !important;
         position: absolute !important;
     }
+}
+
+
+/* Force checkbox to be at the beginning of privacy policy text */
+.xep-privacy-policy-wrap,
+.woocommerce-terms-and-conditions-wrapper {
+    display: block !important;
+}
+
+.xep-privacy-policy-wrap label,
+.woocommerce-terms-and-conditions-wrapper label {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+
+.xep-privacy-policy-wrap input[type="checkbox"],
+.woocommerce-terms-and-conditions-wrapper input[type="checkbox"] {
+    order: 1 !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+}
+
+.xep-privacy-policy-wrap span,
+.xep-privacy-policy-wrap .woocommerce-privacy-policy-text,
+.woocommerce-terms-and-conditions-wrapper span {
+    order: 2 !important;
+    flex: 1 !important;
+    margin: 0 !important;
 }

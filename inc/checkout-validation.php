@@ -13,13 +13,13 @@ function xepmarket2_add_checkout_privacy_policy_with_checkbox()
 
     $text = __('By completing your order, you agree to our:', 'xepmarket2') . ' ' . $privacy_link;
 
-    echo '<div class="xep-privacy-policy-wrap" style="margin: 25px 0; width: 100%; border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; background: rgba(255,255,255,0.02); overflow: hidden;">';
-    echo '<label class="woocommerce-form__label woocommerce-form__label-for-checkbox checkbox" style="display: flex !important; align-items: center; justify-content: flex-start; gap: 15px; cursor: pointer; font-size: 15px; color: rgba(255, 255, 255, 0.85); width: 100% !important; margin: 0 !important; padding: 25px; box-sizing: border-box; min-height: 80px;">';
-    echo '<input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox" name="xep_privacy_policy_acceptance" id="xep_privacy_policy_acceptance" value="1" style="margin: 0 !important; transform: scale(1.1); flex-shrink: 0;" /> ';
-    echo '<span class="woocommerce-privacy-policy-text" style="line-height: normal; display: block; flex: 1; margin: 0 !important; padding: 0 !important;">' . $text . ' <abbr class="required" style="color: #ff453a; margin-left: 5px; border: none; text-decoration: none; font-size: 18px; vertical-align: middle; line-height: 0;" title="required">*</abbr></span>';
+    echo '<div class="xep-privacy-policy-wrap" style="width: 100% !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 20px !important; background: rgba(255, 255, 255, 0.02) !important; margin: 15px 0 !important;">';
+    echo '<label class="woocommerce-form__label woocommerce-form__label-for-checkbox checkbox" style="display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; padding: 25px !important; margin: 0 !important; gap: 15px !important; width: 100% !important; box-sizing: border-box !important;">';
+    echo '<input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox" name="xep_privacy_policy_acceptance" id="xep_privacy_policy_acceptance" value="1" style="width: 18px !important; height: 18px !important; min-width: 18px !important; max-width: 18px !important; margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; flex-grow: 0 !important; display: inline-block !important; position: relative !important; order: 1 !important; appearance: auto !important;" />';
+    echo '<span class="woocommerce-privacy-policy-text" style="display: inline-block !important; flex-grow: 1 !important; margin: 0 !important; padding: 0 !important; line-height: 1.4 !important; color: rgba(255, 255, 255, 0.85) !important; font-size: 15px !important; order: 2 !important; text-align: left !important;">' . $text . ' <abbr class="required" title="required" style="color: #ff453a !important; text-decoration: none !important; margin-left: 5px !important;">*</abbr></span>';
     echo '</label></div>';
 
-    // Disable default WooCommerce behavior for this block
+    // Disable default WooCommerce behavior for this block (avoid duplicate privacy text if WC tries to show one)
     echo '<style>.woocommerce-privacy-policy-text:not(.xep-privacy-policy-wrap .woocommerce-privacy-policy-text) { display: none !important; }</style>';
 }
 
@@ -163,12 +163,86 @@ function xepmarket2_checkout_validation_js()
             display: none;
         }
 
+        /* Symmetry Fix for Terms and Privacy boxes */
+        .woocommerce-terms-and-conditions-wrapper, 
+        .xep-privacy-policy-wrap {
+            margin: 15px 0 !important;
+            width: 100% !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: 20px !important;
+            background: rgba(255, 255, 255, 0.02) !important;
+            overflow: hidden !important;
+        }
 
-        .xep-privacy-policy-wrap .woocommerce-privacy-policy-text {
+        .woocommerce-terms-and-conditions-wrapper .woocommerce-privacy-policy-text {
+            display: none !important; /* Managed by our custom block */
+        }
+
+        .woocommerce-terms-and-conditions-wrapper p.form-row,
+        .xep-privacy-policy-wrap label {
             margin: 0 !important;
             padding: 0 !important;
+        }
+
+        .woocommerce-terms-and-conditions-wrapper label.checkbox, 
+        .xep-privacy-policy-wrap label {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: 15px !important;
+            cursor: pointer !important;
+            font-size: 15px !important;
+            color: rgba(255, 255, 255, 0.85) !important;
+            width: 100% !important;
+            padding: 25px !important;
+            box-sizing: border-box !important;
+            min-height: 80px !important;
+            background: transparent !important;
+            border: none !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+        }
+
+        .woocommerce-terms-and-conditions-wrapper input[type="checkbox"],
+        .xep-privacy-policy-wrap input[type="checkbox"] {
+            margin: 0 !important;
+            transform: scale(1.1) !important;
+            flex-shrink: 0 !important;
+            order: 1 !important;
+            width: 16px !important;
+            height: 16px !important;
+            max-width: 16px !important;
+            position: relative !important;
+            display: block !important;
+        }
+
+        .woocommerce-terms-and-conditions-wrapper span,
+        .xep-privacy-policy-wrap span {
             line-height: 1.4 !important;
-            display: inline-block !important;
+            display: block !important;
+            flex: 1 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            color: rgba(255, 255, 255, 0.85) !important;
+            order: 2 !important;
+        }
+
+        .woocommerce-terms-and-conditions-wrapper a,
+        .xep-privacy-policy-wrap a {
+            color: #00f2ff !important;
+            text-decoration: underline !important;
+            font-weight: 700 !important;
+        }
+
+        .woocommerce-terms-and-conditions-wrapper .required,
+        .xep-privacy-policy-wrap .required {
+            color: #ff453a !important;
+            margin-left: 5px !important;
+            border: none !important;
+            text-decoration: none !important;
+            font-size: 18px !important;
+            vertical-align: middle !important;
+            line-height: 0 !important;
         }
 
         @keyframes xepShake {
@@ -193,6 +267,64 @@ function xepmarket2_checkout_validation_js()
     <script>
 
         (function ($) {
+            // Fix checkbox positioning function
+            var isFixing = false; // Prevent recursive calls
+            function fixCheckboxPosition() {
+                if (isFixing) return;
+                isFixing = true;
+                
+                // Fix both privacy policy checkboxes
+                $('.xep-privacy-policy-wrap, .woocommerce-terms-and-conditions-wrapper').each(function() {
+                    var $wrapper = $(this);
+                    var $label = $wrapper.find('label').first();
+                    
+                    if (!$label.length) return;
+                    
+                    // Find checkbox and text elements
+                    var $checkbox = $label.find('input[type="checkbox"]').first();
+                    var $text = $label.find('span, .woocommerce-privacy-policy-text').first();
+                    
+                    if (!$checkbox.length || !$text.length) return;
+                    
+                    // Check if already in correct order
+                    if ($checkbox.index() < $text.index()) {
+                        return; // Already correct, skip
+                    }
+                    
+                    // Force structure: checkbox MUST come before text
+                    var checkboxHtml = $checkbox[0].outerHTML;
+                    var textHtml = $text[0].outerHTML;
+                    
+                    // Clear label and rebuild
+                    $label.empty();
+                    $label.append(checkboxHtml);
+                    $label.append(textHtml);
+                    
+                    // Force CSS
+                    $label.css({
+                        'display': 'flex',
+                        'flex-direction': 'row',
+                        'flex-wrap': 'nowrap',
+                        'align-items': 'center',
+                        'gap': '15px'
+                    });
+                    
+                    $label.find('input[type="checkbox"]').css({
+                        'order': '1',
+                        'flex-shrink': '0',
+                        'margin': '0'
+                    });
+                    
+                    $label.find('span, .woocommerce-privacy-policy-text').css({
+                        'order': '2',
+                        'flex': '1',
+                        'margin': '0'
+                    });
+                });
+                
+                setTimeout(function() { isFixing = false; }, 100);
+            }
+            
             // -- Modal Logic --
             $(document).on('click', '.xep-privacy-modal-trigger', function (e) {
                 e.preventDefault();
@@ -216,6 +348,9 @@ function xepmarket2_checkout_validation_js()
 
             // -- Validation Logic --
             function doValidation() {
+                // Fix checkbox positioning FIRST
+                fixCheckboxPosition();
+                
                 var $btn = $('#place_order');
                 if (!$btn.length) return;
 
@@ -310,16 +445,23 @@ function xepmarket2_checkout_validation_js()
 
             // Initial run
             $(document).ready(function () {
-                setTimeout(doValidation, 1000); // Small delay for extensions to inject
+                fixCheckboxPosition();
+                setTimeout(doValidation, 1000);
+            });
+            
+            // Fix on WooCommerce events only (no MutationObserver)
+            $(document.body).on('updated_checkout', function() {
+                setTimeout(fixCheckboxPosition, 100);
             });
 
-            // Re-run frequently but not every 300ms
-            var validationCounter = 0;
-            var validationInterval = setInterval(function () {
-                doValidation();
-                validationCounter++;
-                if (validationCounter > 20) clearInterval(validationInterval); // Stop after 10 seconds of page load
-            }, 500);
+            // Validation on user interaction only
+            $(document).on('change input', 'form.checkout input, form.checkout select, form.checkout textarea', function () {
+                setTimeout(doValidation, 50);
+            });
+
+            $(document.body).on('updated_checkout checkout_error updated_shipping_method', function () {
+                setTimeout(doValidation, 100);
+            });
 
         })(jQuery);
     </script>
