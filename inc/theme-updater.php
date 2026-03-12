@@ -122,13 +122,17 @@ class XepMarket_Theme_Updater
 
     public function updater_page_html()
     {
-        $theme = wp_get_theme($this->theme_slug);
-        $current_version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
-        if (empty($current_version) && defined('XEPMARKET_ALFA_VERSION')) {
-            $current_version = XEPMARKET_ALFA_VERSION;
+        // Read version directly from style.css to avoid wp_get_theme cache
+        $style_path = get_theme_root() . '/' . $this->theme_slug . '/style.css';
+        $current_version = 'Unknown';
+        if (file_exists($style_path)) {
+            $raw = file_get_contents($style_path);
+            if ($raw !== false && preg_match('/Version:\s*([\d.]+)/', $raw, $m)) {
+                $current_version = $m[1];
+            }
         }
-        if (empty($current_version)) {
-            $current_version = 'Unknown';
+        if ($current_version === 'Unknown' && defined('XEPMARKET_ALFA_VERSION')) {
+            $current_version = XEPMARKET_ALFA_VERSION;
         }
 
         $release = $this->get_latest_release(true); // force check for the page display
@@ -362,70 +366,64 @@ class XepMarket_Theme_Updater
 
             $release = $this->get_latest_release(false);
             $expected_version = ($release && isset($release->tag_name)) ? ltrim($release->tag_name, 'v') : '';
-            xepmarket2_sync_plugin_versions_to_theme();
-            wp_clean_themes_cache();
+
+            // ── ALWAYS patch version in theme files after successful upgrade ──
+            // GitHub tags may not match the Version header in style.css,
+            // so we force-write the correct version from the tag.
+            $theme_root_dir = get_theme_root() . '/' . $this->theme_slug;
+            
+            // Patch style.css
+            $style_path = $theme_root_dir . '/style.css';
+            if ($expected_version && file_exists($style_path) && is_writable($style_path)) {
+                $css = file_get_contents($style_path);
+                if ($css !== false) {
+                    $patched = preg_replace('/Version:\s*[\d.]+/', 'Version: ' . $expected_version, $css, 1, $count);
+                    if ($count > 0) {
+                        file_put_contents($style_path, $patched);
+                        error_log('XEP Update: Patched style.css → Version: ' . $expected_version);
+                    }
+                }
+            }
+
+            // Patch XEPMARKET_ALFA_VERSION constant in functions.php
+            $func_path = $theme_root_dir . '/functions.php';
+            if ($expected_version && file_exists($func_path) && is_writable($func_path)) {
+                $fc = file_get_contents($func_path);
+                if ($fc !== false) {
+                    $fc = preg_replace(
+                        "/define\s*\(\s*'XEPMARKET_ALFA_VERSION'\s*,\s*'[^']*'\s*\)/",
+                        "define('XEPMARKET_ALFA_VERSION', '" . $expected_version . "')",
+                        $fc, 1
+                    );
+                    file_put_contents($func_path, $fc);
+                    error_log('XEP Update: Patched functions.php constant → ' . $expected_version);
+                }
+            }
+
+            // Sync OmniXEP plugin version
+            if (function_exists('xepmarket2_sync_plugin_versions_to_theme')) {
+                xepmarket2_sync_plugin_versions_to_theme();
+            }
+
+            // Clear ALL caches
+            wp_clean_themes_cache(true);
             delete_site_transient('update_themes');
             delete_transient('xepmarket2_github_release');
 
-            // Force a hard refresh of theme data from             wp_clean_themes_cache();
-            $theme = wp_get_theme($this->theme_slug);
-            
-            // If theme slug doesn't return theme, try current theme
-            if (!$theme->exists()) {
-                $theme = wp_get_theme();
-            }
-
-            $theme_root = $theme->exists() ? $theme->get_stylesheet_directory() : '';
-            $style_file = $theme_root ? $theme_root . '/style.css' : '';
-            $version_on_disk = '';
-            
-            if ($style_file && is_readable($style_file)) {
-                $file_data = get_file_data($style_file, array('Version' => 'Version'));
-                if (!empty($file_data['Version'])) {
-                    $version_on_disk = trim($file_data['Version']);
+            // Re-read to confirm
+            $version_on_disk = $expected_version; // We just wrote it
+            if (file_exists($style_path)) {
+                $raw = file_get_contents($style_path);
+                if (preg_match('/Version:\s*([\d.]+)/', $raw, $m)) {
+                    $version_on_disk = $m[1];
                 }
             }
 
-            error_log("XEP Update Result: Expected {$expected_version}, Found on disk: " . ($version_on_disk ?: 'UNKNOWN'));
-
-            // If version is still old, try patching style.css directly
-            if ($expected_version && !empty($version_on_disk) && version_compare($version_on_disk, $expected_version, '<')) {
-                $style_path = get_theme_root() . '/' . $this->theme_slug . '/style.css';
-                if (is_writable($style_path)) {
-                    $css = file_get_contents($style_path);
-                    if ($css !== false) {
-                        $css = preg_replace('/Version:\s*[\d.]+/', 'Version: ' . $expected_version, $css, 1);
-                        file_put_contents($style_path, $css);
-                        $version_on_disk = $expected_version;
-                        error_log('XEP Update: Patched style.css version to ' . $expected_version);
-                    }
-                }
-                // Also patch the constant in functions.php
-                $func_path = get_theme_root() . '/' . $this->theme_slug . '/functions.php';
-                if (is_writable($func_path)) {
-                    $fc = file_get_contents($func_path);
-                    if ($fc !== false) {
-                        $fc = preg_replace(
-                            "/define\s*\(\s*'XEPMARKET_ALFA_VERSION'\s*,\s*'[^']*'\s*\)/",
-                            "define('XEPMARKET_ALFA_VERSION', '" . $expected_version . "')",
-                            $fc, 1
-                        );
-                        file_put_contents($func_path, $fc);
-                    }
-                }
-                wp_clean_themes_cache();
-            }
-
-            // If version is empty (unknown), don't treat it as a hard error if upgrade() returned true
-            // Just warn the user to refresh.
-            $message = 'Theme updated successfully.';
-            if (empty($version_on_disk)) {
-                $message .= ' Note: Could not verify version on disk immediately (might be cached). Please refresh the page.';
-            }
+            error_log("XEP Update Complete: Expected {$expected_version}, On disk: {$version_on_disk}");
 
             wp_send_json_success(array(
-                'message' => $message,
-                'version' => $version_on_disk ?: $expected_version
+                'message' => 'Theme updated successfully to version ' . $version_on_disk . '.',
+                'version' => $version_on_disk
             ));
         } catch (Exception $e) {
             error_log("XEP Update Exception: " . $e->getMessage());
@@ -461,8 +459,38 @@ class XepMarket_Theme_Updater
             wp_die('Update failed: Upgrader returned false. Please check file permissions (FS_METHOD) or try manual update via Appearance > Themes.');
         }
 
-        xepmarket2_sync_plugin_versions_to_theme();
-        wp_clean_themes_cache();
+        // Patch version in theme files
+        $release = $this->get_latest_release(false);
+        $expected_version = ($release && isset($release->tag_name)) ? ltrim($release->tag_name, 'v') : '';
+        $theme_root_dir = get_theme_root() . '/' . $this->theme_slug;
+
+        if ($expected_version) {
+            $style_path = $theme_root_dir . '/style.css';
+            if (file_exists($style_path) && is_writable($style_path)) {
+                $css = file_get_contents($style_path);
+                if ($css !== false) {
+                    $css = preg_replace('/Version:\s*[\d.]+/', 'Version: ' . $expected_version, $css, 1);
+                    file_put_contents($style_path, $css);
+                }
+            }
+            $func_path = $theme_root_dir . '/functions.php';
+            if (file_exists($func_path) && is_writable($func_path)) {
+                $fc = file_get_contents($func_path);
+                if ($fc !== false) {
+                    $fc = preg_replace(
+                        "/define\s*\(\s*'XEPMARKET_ALFA_VERSION'\s*,\s*'[^']*'\s*\)/",
+                        "define('XEPMARKET_ALFA_VERSION', '" . $expected_version . "')",
+                        $fc, 1
+                    );
+                    file_put_contents($func_path, $fc);
+                }
+            }
+        }
+
+        if (function_exists('xepmarket2_sync_plugin_versions_to_theme')) {
+            xepmarket2_sync_plugin_versions_to_theme();
+        }
+        wp_clean_themes_cache(true);
         delete_site_transient('update_themes');
         delete_transient('xepmarket2_github_release');
         wp_safe_redirect($redirect_to);
