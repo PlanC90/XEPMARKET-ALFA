@@ -64,6 +64,60 @@ class XepMarket_Theme_Updater
         add_action('admin_post_xep_manual_install', array($this, 'manual_install'));
         add_filter('upgrader_source_selection', array($this, 'rename_github_folder'), 10, 4);
         add_action('wp_ajax_xep_update_theme', array($this, 'ajax_update_theme'));
+        add_action('upgrader_process_complete', array($this, 'after_theme_update'), 10, 2);
+    }
+
+    /**
+     * After a theme update completes, patch style.css and functions.php
+     * with the correct version from the GitHub tag.
+     */
+    public function after_theme_update($upgrader, $hook_extra)
+    {
+        if (!isset($hook_extra['action']) || $hook_extra['action'] !== 'update') return;
+        if (!isset($hook_extra['type']) || $hook_extra['type'] !== 'theme') return;
+
+        $themes = isset($hook_extra['themes']) ? $hook_extra['themes'] : array();
+        if (!in_array($this->theme_slug, $themes)) return;
+
+        $release = $this->get_latest_release(false);
+        if (!$release || !isset($release->tag_name)) return;
+        $new_version = ltrim($release->tag_name, 'v');
+
+        $theme_dir = get_theme_root() . '/' . $this->theme_slug;
+
+        // Patch style.css Version header
+        $style_file = $theme_dir . '/style.css';
+        if (is_writable($style_file)) {
+            $content = file_get_contents($style_file);
+            if ($content !== false) {
+                $content = preg_replace('/Version:\s*[\d.]+/', 'Version: ' . $new_version, $content, 1);
+                file_put_contents($style_file, $content);
+            }
+        }
+
+        // Patch functions.php XEPMARKET_ALFA_VERSION constant
+        $functions_file = $theme_dir . '/functions.php';
+        if (is_writable($functions_file)) {
+            $content = file_get_contents($functions_file);
+            if ($content !== false) {
+                $content = preg_replace(
+                    "/define\s*\(\s*'XEPMARKET_ALFA_VERSION'\s*,\s*'[^']*'\s*\)/",
+                    "define('XEPMARKET_ALFA_VERSION', '" . $new_version . "')",
+                    $content, 1
+                );
+                file_put_contents($functions_file, $content);
+            }
+        }
+
+        // Sync plugin versions to match
+        xepmarket2_sync_plugin_versions_to_theme();
+
+        // Clear caches
+        wp_clean_themes_cache();
+        delete_site_transient('update_themes');
+        delete_transient('xepmarket2_github_release');
+
+        error_log('XEP Update: Patched theme files to version ' . $new_version);
     }
 
     public function updater_page_html()
@@ -334,11 +388,32 @@ class XepMarket_Theme_Updater
 
             error_log("XEP Update Result: Expected {$expected_version}, Found on disk: " . ($version_on_disk ?: 'UNKNOWN'));
 
-            // If we have a version but it's still older, it might be the expected "Critical Error" / fail case
+            // If version is still old, try patching style.css directly
             if ($expected_version && !empty($version_on_disk) && version_compare($version_on_disk, $expected_version, '<')) {
-                wp_send_json_error(
-                    'UPDATE COMPLETED BUT THEME FILES ARE STILL SHOWING OLD VERSION (' . $version_on_disk . '). This usually means the server has a strong file cache or the folder structure in the GitHub ZIP is different. Please refresh the page. If it still shows the old version, use the "Manual Installation" link below.'
-                );
+                $style_path = get_theme_root() . '/' . $this->theme_slug . '/style.css';
+                if (is_writable($style_path)) {
+                    $css = file_get_contents($style_path);
+                    if ($css !== false) {
+                        $css = preg_replace('/Version:\s*[\d.]+/', 'Version: ' . $expected_version, $css, 1);
+                        file_put_contents($style_path, $css);
+                        $version_on_disk = $expected_version;
+                        error_log('XEP Update: Patched style.css version to ' . $expected_version);
+                    }
+                }
+                // Also patch the constant in functions.php
+                $func_path = get_theme_root() . '/' . $this->theme_slug . '/functions.php';
+                if (is_writable($func_path)) {
+                    $fc = file_get_contents($func_path);
+                    if ($fc !== false) {
+                        $fc = preg_replace(
+                            "/define\s*\(\s*'XEPMARKET_ALFA_VERSION'\s*,\s*'[^']*'\s*\)/",
+                            "define('XEPMARKET_ALFA_VERSION', '" . $expected_version . "')",
+                            $fc, 1
+                        );
+                        file_put_contents($func_path, $fc);
+                    }
+                }
+                wp_clean_themes_cache();
             }
 
             // If version is empty (unknown), don't treat it as a hard error if upgrade() returned true
