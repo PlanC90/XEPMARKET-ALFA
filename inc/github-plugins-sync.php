@@ -183,6 +183,114 @@ function xepmarket2_ajax_github_plugins_sync()
 add_action('wp_ajax_xepmarket2_github_plugins_sync', 'xepmarket2_ajax_github_plugins_sync');
 
 /**
+ * AJAX Step 1: Prepare (Download & Extract)
+ * Returns { slugs: [] }
+ */
+function xepmarket2_ajax_prepare_plugins_sync() {
+    check_ajax_referer(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION, 'nonce');
+    if (!current_user_can('install_plugins')) {
+        wp_send_json_error(['message' => 'Permission denied.']);
+    }
+
+    $temp_dir = get_temp_dir() . 'xep_sync_' . wp_generate_password(8, false) . '/';
+    if (!wp_mkdir_p($temp_dir)) {
+        wp_send_json_error(['message' => 'Could not create temp dir.']);
+    }
+
+    $response = wp_remote_get(XEPMARKET2_GITHUB_PLUGINS_REPO, ['timeout' => 120]);
+    if (is_wp_error($response)) {
+        wp_send_json_error(['message' => $response->get_error_message()]);
+    }
+
+    $body = wp_remote_retrieve_body($response);
+    if (empty($body)) {
+        wp_send_json_error(['message' => 'Empty response from GitHub.']);
+    }
+
+    $zip_path = $temp_dir . 'main.zip';
+    file_put_contents($zip_path, $body);
+
+    $zip = new ZipArchive();
+    if ($zip->open($zip_path) !== true) {
+        wp_send_json_error(['message' => 'Could not open ZIP.']);
+    }
+
+    $extract_to = $temp_dir . 'extract/';
+    wp_mkdir_p($extract_to);
+    $zip->extractTo($extract_to);
+    $zip->close();
+
+    $root_folders = array_values(array_filter(glob($extract_to . '*'), 'is_dir'));
+    $repo_root = $root_folders[0] ?? null;
+    if (!$repo_root) {
+        wp_send_json_error(['message' => 'Invalid repo structure.']);
+    }
+
+    // Get all plugin slugs
+    $slugs = [];
+    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot'];
+    foreach (scandir($repo_root) as $name) {
+        if ($name === '.' || $name === '..' || in_array($name, $skip_names, true)) continue;
+        if (stripos($name, 'telegram') !== false && stripos($name, 'bot') !== false) continue;
+        if (is_dir($repo_root . '/' . $name)) {
+            $slugs[] = $name;
+        }
+    }
+
+    // Store state in transient for Step 2
+    set_transient('xep_sync_repo_root', $repo_root, 600);
+    set_transient('xep_sync_temp_dir', $temp_dir, 600);
+
+    wp_send_json_success(['slugs' => $slugs]);
+}
+add_action('wp_ajax_xep_prepare_plugins_sync', 'xepmarket2_ajax_prepare_plugins_sync');
+
+/**
+ * AJAX Step 2: Install Single Plugin
+ */
+function xepmarket2_ajax_install_plugin_step() {
+    check_ajax_referer(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION, 'nonce');
+    if (!current_user_can('install_plugins')) wp_send_json_error(['message' => 'Denied']);
+
+    $slug = isset($_POST['slug']) ? sanitize_text_field($_POST['slug']) : '';
+    $repo_root = get_transient('xep_sync_repo_root');
+    
+    if (!$slug || !$repo_root || !is_dir($repo_root)) {
+        wp_send_json_error(['message' => 'Sync state lost or invalid slug.']);
+    }
+
+    $source = $repo_root . DIRECTORY_SEPARATOR . $slug;
+    $inner = $source . DIRECTORY_SEPARATOR . $slug;
+    if (is_dir($inner) && file_exists($inner . DIRECTORY_SEPARATOR . $slug . '.php')) {
+        $source = $inner;
+    }
+
+    $dest = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . $slug;
+    $errors = [];
+    $success = xepmarket2_copy_plugin_dir($source, $dest, $errors);
+
+    if (!$success) {
+        wp_send_json_error(['message' => implode('; ', $errors)]);
+    }
+
+    wp_send_json_success(['slug' => $slug]);
+}
+add_action('wp_ajax_xep_install_plugin_step', 'xepmarket2_ajax_install_plugin_step');
+
+/**
+ * AJAX Step 3: Finalize (Cleanup)
+ */
+function xepmarket2_ajax_finalize_plugins_sync() {
+    check_ajax_referer(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION, 'nonce');
+    $temp_dir = get_transient('xep_sync_temp_dir');
+    if ($temp_dir) xepmarket2_github_sync_cleanup($temp_dir);
+    delete_transient('xep_sync_repo_root');
+    delete_transient('xep_sync_temp_dir');
+    wp_send_json_success();
+}
+add_action('wp_ajax_xep_finalize_plugins_sync', 'xepmarket2_ajax_finalize_plugins_sync');
+
+/**
  * Download repo ZIP, extract, copy each plugin folder into wp-content/plugins.
  *
  * @return array|WP_Error { 'updated' => string[], 'installed' => string[], 'skipped' => string[], 'errors' => string[] }

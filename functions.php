@@ -2709,12 +2709,23 @@ function xepmarket2_settings_page()
 
                             <div class="xep-form-group" id="xep-install-all-modules-row"
                                 style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; background: linear-gradient(135deg, rgba(0, 242, 255, 0.08), rgba(112, 0, 255, 0.08)); padding: 18px 20px; border-radius: 12px; border: 1px solid rgba(0, 242, 255, 0.25); margin-bottom: 25px;">
-                                <div>
+                                <div style="flex: 1;">
                                     <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
                                         <i class="fas fa-download" style="color: var(--admin-primary);"></i>
                                         Install all required modules
                                     </div>
                                     <div class="description" style="margin-top: 4px;">Download all plugins from <code>github.com/PlanC90/plugins</code> and install them into <code>wp-content/plugins</code>. Existing plugins will be updated.</div>
+                                    
+                                    <!-- Progress Bar Container -->
+                                    <div id="xep-sync-progress-container" style="display: none; margin-top: 15px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <span id="xep-sync-status-text" style="font-size: 12px; font-weight: 600; color: var(--admin-primary);">Starting installation...</span>
+                                            <span id="xep-sync-percentage" style="font-size: 12px; font-weight: 700; color: #fff;">0%</span>
+                                        </div>
+                                        <div style="height: 10px; background: rgba(255,255,255,0.05); border-radius: 5px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
+                                            <div id="xep-sync-progress-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--admin-primary), #7000ff); border-radius: 5px; transition: width 0.4s ease, box-shadow 0.3s ease; box-shadow: 0 0 10px rgba(0, 242, 255, 0.3);"></div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <button type="button" id="xep-install-all-modules-btn" class="xep-save-btn"
                                     data-nonce="<?php echo esc_attr(wp_create_nonce(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION)); ?>"
@@ -4052,78 +4063,113 @@ function xepmarket2_settings_page()
                 $('#xep-settings-form').submit();
             });
 
-            // ── AJAX: GitHub Plugins Sync ──
-            $('#xep-github-sync-btn').on('click', function () {
-                var $btn = $(this);
+
+            // ── Multi-Step Plugin Installation Logic ──
+            function runSequentialPluginSync($btn, btnTextOriginal, btnIconOriginalClass) {
                 var nonce = $btn.data('nonce');
-                if (!nonce) return;
-                if (!confirm('Download all plugins from GitHub (PlanC90/plugins) and copy to wp-content/plugins? Existing folders will be updated.')) return;
-                $btn.prop('disabled', true).find('.btn-text').text('Syncing...');
-                $btn.find('i').removeClass('fa-github').addClass('fa-spinner fa-spin');
+                var $statusText = $('#xep-sync-status-text');
+                var $percentage = $('#xep-sync-percentage');
+                var $progressBar = $('#xep-sync-progress-bar');
+                var $progressContainer = $('#xep-sync-progress-container');
+
+                $btn.prop('disabled', true).find('.btn-text').text('Processing...');
+                $btn.find('i').removeClass(btnIconOriginalClass).addClass('fa-spinner fa-spin');
+                $progressContainer.fadeIn();
+
+                function updateProgress(percent, status) {
+                    $progressBar.css('width', percent + '%');
+                    $percentage.text(Math.round(percent) + '%');
+                    if (status) $statusText.text(status);
+                }
+
+                // Step 1: Prepare (Download & Extract)
+                updateProgress(10, 'Downloading repository archive...');
                 $.ajax({
-                    url: typeof ajaxurl !== 'undefined' ? ajaxurl : (typeof xep_admin !== 'undefined' ? xep_admin.ajax_url : ''),
+                    url: ajaxurl,
                     type: 'POST',
-                    data: { action: 'xepmarket2_github_plugins_sync', nonce: nonce },
+                    data: { action: 'xep_prepare_plugins_sync', nonce: nonce },
                     success: function (res) {
-                        if (res.success && res.data) {
-                            var d = res.data;
-                            var msg = [];
-                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.length + ' plugin(s)');
-                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.length + ' plugin(s)');
-                            if (d.errors && d.errors.length) msg.push('Errors: ' + d.errors.join('; '));
-                            var text = msg.length ? msg.join(' • ') : 'Sync completed.';
-                            alert(text + '\n\nRefreshing page...');
-                            window.location.reload();
+                        if (res.success && res.data.slugs) {
+                            var slugs = res.data.slugs;
+                            var total = slugs.length;
+                            var installed = 0;
+
+                            if (total === 0) {
+                                finalizeSync('No plugins found in repository.');
+                                return;
+                            }
+
+                            // Step 2: Install plugins sequentially
+                            function installNext() {
+                                if (installed >= total) {
+                                    finalizeSync();
+                                    return;
+                                }
+
+                                var slug = slugs[installed];
+                                var progress = 10 + ((installed / total) * 80);
+                                updateProgress(progress, 'Installing ' + slug + '...');
+
+                                $.ajax({
+                                    url: ajaxurl,
+                                    type: 'POST',
+                                    data: { action: 'xep_install_plugin_step', nonce: nonce, slug: slug },
+                                    success: function (stepRes) {
+                                        if (stepRes.success) {
+                                            installed++;
+                                            installNext();
+                                        } else {
+                                            handleError(stepRes.data.message || 'Failed to install ' + slug);
+                                        }
+                                    },
+                                    error: function (xhr) {
+                                        handleError('Request failed during installation of ' + slug);
+                                    }
+                                });
+                            }
+
+                            installNext();
                         } else {
-                            alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown'));
-                            $btn.prop('disabled', false).find('.btn-text').text('Sync from GitHub');
-                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-github');
+                            handleError(res.data.message || 'Preparation failed.');
                         }
                     },
                     error: function (xhr) {
-                        var errMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) ? xhr.responseJSON.data.message : xhr.statusText;
-                        alert('Request failed: ' + errMsg);
-                        $btn.prop('disabled', false).find('.btn-text').text('Sync from GitHub');
-                        $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-github');
+                        handleError('Request failed during preparation.');
                     }
                 });
+
+                function finalizeSync(msg) {
+                    updateProgress(95, 'Cleaning up temporary files...');
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: { action: 'xep_finalize_plugins_sync', nonce: nonce },
+                        success: function () {
+                            updateProgress(100, 'Installation complete!');
+                            setTimeout(function () {
+                                alert(msg || 'All modules installed and updated successfully! Refreshing...');
+                                window.location.reload();
+                            }, 1000);
+                        }
+                    });
+                }
+
+                function handleError(errorMsg) {
+                    alert('Sync Error: ' + errorMsg);
+                    $btn.prop('disabled', false).find('.btn-text').text(btnTextOriginal);
+                    $btn.find('i').removeClass('fa-spinner fa-spin').addClass(btnIconOriginalClass);
+                    $statusText.text('Error: ' + errorMsg).css('color', '#ff453a');
+                }
+            }
+
+            $('#xep-install-all-modules-btn').on('click', function () {
+                if (!confirm('Download and install all required modules from GitHub?')) return;
+                runSequentialPluginSync($(this), 'Install all required modules', 'fa-download');
             });
 
-            // ── Install all required modules (same as GitHub sync, from PlanC90/plugins) ──
-            $('#xep-install-all-modules-btn').on('click', function () {
-                var $btn = $(this);
-                var nonce = $btn.data('nonce');
-                if (!nonce) return;
-                if (!confirm('Download all plugins from GitHub (PlanC90/plugins) and install them into wp-content/plugins? Existing folders will be updated.')) return;
-                $btn.prop('disabled', true).find('.btn-text').text('Installing...');
-                $btn.find('i').removeClass('fa-download').addClass('fa-spinner fa-spin');
-                $.ajax({
-                    url: typeof ajaxurl !== 'undefined' ? ajaxurl : (typeof xep_admin !== 'undefined' ? xep_admin.ajax_url : ''),
-                    type: 'POST',
-                    data: { action: 'xepmarket2_github_plugins_sync', nonce: nonce },
-                    success: function (res) {
-                        if (res.success && res.data) {
-                            var d = res.data;
-                            var msg = [];
-                            if (d.installed && d.installed.length) msg.push('Installed: ' + d.installed.length + ' plugin(s)');
-                            if (d.updated && d.updated.length) msg.push('Updated: ' + d.updated.length + ' plugin(s)');
-                            if (d.errors && d.errors.length) msg.push('Errors: ' + d.errors.join('; '));
-                            var text = msg.length ? msg.join(' • ') : 'All modules installed.';
-                            alert(text + '\n\nRefreshing page...');
-                            window.location.reload();
-                        } else {
-                            alert('Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown'));
-                            $btn.prop('disabled', false).find('.btn-text').text('Install all required modules');
-                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-download');
-                        }
-                    },
-                    error: function (xhr) {
-                        var errMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) ? xhr.responseJSON.data.message : xhr.statusText;
-                        alert('Request failed: ' + errMsg);
-                        $btn.prop('disabled', false).find('.btn-text').text('Install all required modules');
-                        $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-download');
-                    }
-                });
+            $('#xep-github-sync-btn').on('click', function () {
+                if (!confirm('Sync all plugins from GitHub repository?')) return;
+                runSequentialPluginSync($(this), 'Sync from GitHub', 'fa-github');
             });
 
             // ── AJAX: Demo Import ──
