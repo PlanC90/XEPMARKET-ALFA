@@ -26,6 +26,18 @@ define('XEPMARKET2_PLUGIN_ZIP_SLUGS', [
 ]);
 
 /**
+ * Initialize WordPress Filesystem
+ */
+function xepmarket2_init_filesystem() {
+    global $wp_filesystem;
+    if (empty($wp_filesystem)) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        WP_Filesystem();
+    }
+    return $wp_filesystem;
+}
+
+/**
  * TGMPA / Upgrader: single-plugin zip from GitHub (WordPress expects one root folder).
  * GET admin-ajax.php?action=xepmarket2_plugin_zip&slug=omnixep-woocommerce&token=...
  */
@@ -101,15 +113,19 @@ function xepmarket2_plugin_zip_endpoint()
         exit;
     }
 
-    $source = $repo_root . DIRECTORY_SEPARATOR . $slug;
-    $inner = $source . DIRECTORY_SEPARATOR . $slug;
-    if (is_dir($inner) && file_exists($inner . DIRECTORY_SEPARATOR . $slug . '.php')) {
+    // Set source and normalize path
+    $source = rtrim(str_replace('\\', '/', $repo_root), '/') . '/' . $slug;
+    $inner = $source . '/' . $slug;
+    
+    // Handle nested structure if necessary
+    if (is_dir($inner) && file_exists($inner . '/' . $slug . '.php')) {
         $source = $inner;
     }
+    
     if (!is_dir($source)) {
         xepmarket2_github_sync_cleanup($temp_dir);
         status_header(404);
-        echo 'Plugin slug not found in repo.';
+        echo 'Plugin slug not found in repo: ' . $slug;
         exit;
     }
 
@@ -121,20 +137,44 @@ function xepmarket2_plugin_zip_endpoint()
         echo 'Could not create output zip.';
         exit;
     }
+
+    // Add files with the slug as root folder
+    $z->addEmptyDir($slug);
+    
     $files = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($source, RecursiveDirectoryIterator::SKIP_DOTS),
         RecursiveIteratorIterator::LEAVES_ONLY
     );
+    
+    $source_len = strlen($source);
+    
     foreach ($files as $file) {
-        $path = $file->getRealPath();
-        $relative = substr($path, strlen($source) + 1);
-        $z->addFile($path, $slug . '/' . str_replace('\\', '/', $relative));
+        if ($file->isDir()) continue;
+        
+        $path = str_replace('\\', '/', $file->getRealPath());
+        $relative = substr($path, $source_len);
+        $relative = ltrim($relative, '/');
+        
+        // Skip hidden files/git
+        if (strpos($relative, '.git') !== false) continue;
+        
+        $z->addFile($path, $slug . '/' . $relative);
     }
+    
     $z->close();
+
+    if (!file_exists($out_zip) || filesize($out_zip) === 0) {
+        xepmarket2_github_sync_cleanup($temp_dir);
+        status_header(500);
+        echo 'Generated zip is empty or missing.';
+        exit;
+    }
 
     header('Content-Type: application/zip');
     header('Content-Disposition: attachment; filename="' . $slug . '.zip"');
     header('Content-Length: ' . filesize($out_zip));
+    header('Pragma: no-cache');
+    header('Expires: 0');
     readfile($out_zip);
     xepmarket2_github_sync_cleanup($temp_dir);
     exit;
@@ -192,34 +232,37 @@ function xepmarket2_ajax_prepare_plugins_sync() {
         wp_send_json_error(['message' => 'Permission denied.']);
     }
 
+    @set_time_limit(0);
+    @ini_set('memory_limit', '512M');
+    $wp_filesystem = xepmarket2_init_filesystem();
+
+    // 1. Download
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    $temp_zip = download_url(XEPMARKET2_GITHUB_PLUGINS_REPO, 120);
+
+    if (is_wp_error($temp_zip)) {
+        wp_send_json_error(['message' => 'Download failed: ' . $temp_zip->get_error_message()]);
+    }
+
+    // 2. Prepare extract dir
     $temp_dir = get_temp_dir() . 'xep_sync_' . wp_generate_password(8, false) . '/';
-    if (!wp_mkdir_p($temp_dir)) {
+    if (!$wp_filesystem->mkdir($temp_dir)) {
+        @unlink($temp_zip);
         wp_send_json_error(['message' => 'Could not create temp dir.']);
     }
 
-    $response = wp_remote_get(XEPMARKET2_GITHUB_PLUGINS_REPO, ['timeout' => 120]);
-    if (is_wp_error($response)) {
-        wp_send_json_error(['message' => $response->get_error_message()]);
-    }
-
-    $body = wp_remote_retrieve_body($response);
-    if (empty($body)) {
-        wp_send_json_error(['message' => 'Empty response from GitHub.']);
-    }
-
-    $zip_path = $temp_dir . 'main.zip';
-    file_put_contents($zip_path, $body);
-
-    $zip = new ZipArchive();
-    if ($zip->open($zip_path) !== true) {
-        wp_send_json_error(['message' => 'Could not open ZIP.']);
-    }
-
     $extract_to = $temp_dir . 'extract/';
-    wp_mkdir_p($extract_to);
-    $zip->extractTo($extract_to);
-    $zip->close();
+    $wp_filesystem->mkdir($extract_to);
 
+    // 3. Unzip
+    $unzip = unzip_file($temp_zip, $extract_to);
+    @unlink($temp_zip); // Always cleanup zip
+
+    if (is_wp_error($unzip)) {
+        wp_send_json_error(['message' => 'Unzip failed: ' . $unzip->get_error_message()]);
+    }
+
+    // 4. Find Repo Root
     $root_folders = array_values(array_filter(glob($extract_to . '*'), 'is_dir'));
     $repo_root = $root_folders[0] ?? null;
     if (!$repo_root) {
@@ -252,6 +295,9 @@ function xepmarket2_ajax_install_plugin_step() {
     check_ajax_referer(XEPMARKET2_GITHUB_SYNC_NONCE_ACTION, 'nonce');
     if (!current_user_can('install_plugins')) wp_send_json_error(['message' => 'Denied']);
 
+    @set_time_limit(0);
+    $wp_filesystem = xepmarket2_init_filesystem();
+
     $slug = isset($_POST['slug']) ? sanitize_text_field($_POST['slug']) : '';
     $repo_root = get_transient('xep_sync_repo_root');
     
@@ -267,10 +313,21 @@ function xepmarket2_ajax_install_plugin_step() {
 
     $dest = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . $slug;
     $errors = [];
+    
+    // Clean up existing plugin folder first for a fresh start
+    if ($wp_filesystem->is_dir($dest)) {
+        if (!$wp_filesystem->delete($dest, true)) {
+            error_log("[OmniXEP Sync] Failed to delete existing directory: " . $dest);
+            // Non-fatal, try to proceed anyway
+        }
+    }
+
     $success = xepmarket2_copy_plugin_dir($source, $dest, $errors);
 
     if (!$success) {
-        wp_send_json_error(['message' => implode('; ', $errors)]);
+        $err_msg = implode('; ', $errors);
+        error_log("[OmniXEP Sync] Error installing " . $slug . ": " . $err_msg);
+        wp_send_json_error(['message' => $err_msg]);
     }
 
     wp_send_json_success(['slug' => $slug]);
@@ -400,38 +457,41 @@ function xepmarket2_sync_plugins_from_github()
 }
 
 /**
- * Recursively copy a plugin directory to destination. Merge/replace.
+ * Recursively copy a plugin directory to destination using WP_Filesystem.
  */
 function xepmarket2_copy_plugin_dir($source, $dest, &$errors)
 {
-    if (!is_dir($source)) {
-        return false;
-    }
-    if (!wp_mkdir_p($dest)) {
-        $errors[] = sprintf(__('Could not create folder: %s', 'xepmarket2'), $dest);
+    global $wp_filesystem;
+    $fs = xepmarket2_init_filesystem();
+
+    if (!$fs->is_dir($source)) {
         return false;
     }
 
-    $dir = dir($source);
-    while (false !== ($entry = $dir->read())) {
-        if ($entry === '.' || $entry === '..') {
-            continue;
+    if (!$fs->is_dir($dest)) {
+        if (!$fs->mkdir($dest, FS_CHMOD_DIR)) {
+            $errors[] = sprintf(__('Could not create folder: %s', 'xepmarket2'), $dest);
+            return false;
         }
-        $src_path = $source . DIRECTORY_SEPARATOR . $entry;
-        $dst_path = $dest . DIRECTORY_SEPARATOR . $entry;
+    }
 
-        if (is_dir($src_path)) {
+    $file_list = $fs->dirlist($source);
+    if (!$file_list) return true;
+
+    foreach ($file_list as $file) {
+        $src_path = str_replace('\\', '/', $source . '/' . $file['name']);
+        $dst_path = str_replace('\\', '/', $dest . '/' . $file['name']);
+
+        if ($file['type'] === 'd') {
             if (!xepmarket2_copy_plugin_dir($src_path, $dst_path, $errors)) {
-                $dir->close();
                 return false;
             }
         } else {
-            if (!copy($src_path, $dst_path)) {
-                $errors[] = sprintf(__('Could not copy: %s', 'xepmarket2'), $entry);
+            if (!$fs->copy($src_path, $dst_path, true, FS_CHMOD_FILE)) {
+                $errors[] = sprintf(__('Could not copy: %s', 'xepmarket2'), $file['name']);
             }
         }
     }
-    $dir->close();
     return true;
 }
 

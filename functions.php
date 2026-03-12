@@ -4123,7 +4123,7 @@ function xepmarket2_settings_page()
                                         }
                                     },
                                     error: function (xhr) {
-                                        handleError('Request failed during installation of ' + slug);
+                                        handleError('Request failed during installation of ' + slug + ' (Status: ' + xhr.status + ')');
                                     }
                                 });
                             }
@@ -4134,7 +4134,7 @@ function xepmarket2_settings_page()
                         }
                     },
                     error: function (xhr) {
-                        handleError('Request failed during preparation.');
+                        handleError('Request failed during preparation (Status: ' + xhr.status + ').');
                     }
                 });
 
