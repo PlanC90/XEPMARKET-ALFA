@@ -462,11 +462,16 @@ function xepmarket2_output_seo_tags()
         echo '<meta name="robots" content="noai, noimageai">' . "\n";
         echo '<meta name="GPTBot" content="none">' . "\n";
     } else {
-        echo '<meta name="ai-content" content="index, follow">' . "\n";
-        echo '<meta name="GPTBot" content="index, follow">' . "\n";
-        echo '<meta name="PerplexityBot" content="index, follow">' . "\n";
-        echo '<meta name="Google-Extended" content="index, follow">' . "\n";
-        echo '<link rel="alternate" type="text/plain" title="LLM-friendly content" href="' . esc_url(home_url('llms.txt')) . '">' . "\n";
+        // Standard Privacy: Don't index sensitive WC pages
+        if (function_exists('is_cart') && (is_cart() || is_checkout() || is_account_page())) {
+            echo '<meta name="robots" content="noindex, nofollow">' . "\n";
+        } else {
+            echo '<meta name="ai-content" content="index, follow">' . "\n";
+            echo '<meta name="GPTBot" content="index, follow">' . "\n";
+            echo '<meta name="PerplexityBot" content="index, follow">' . "\n";
+            echo '<meta name="Google-Extended" content="index, follow">' . "\n";
+            echo '<link rel="alternate" type="text/plain" title="LLM-friendly content" href="' . esc_url(home_url('llms.txt')) . '">' . "\n";
+        }
     }
 
     echo "<!-- End " . esc_html($biz_name) . " SEO Optimizer -->\n\n";
