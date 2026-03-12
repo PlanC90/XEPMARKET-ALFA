@@ -25,6 +25,15 @@ define('XEPMARKET2_PLUGIN_ZIP_SLUGS', [
     'woocommerce-sendinblue-newsletter-subscription',
 ]);
 
+// Official download URLs for public plugins (bypass GitHub for these)
+define('XEPMARKET2_OFFICIAL_PLUGIN_URLS', [
+    'woocommerce' => 'https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip',
+    'woo-alidropship' => 'https://downloads.wordpress.org/plugin/woo-alidropship.latest-stable.zip',
+    'product-variations-swatches-for-woocommerce' => 'https://downloads.wordpress.org/plugin/product-variations-swatches-for-woocommerce.latest-stable.zip',
+    'vargal-additional-variation-gallery-for-woo' => 'https://downloads.wordpress.org/plugin/vargal-additional-variation-gallery-for-woo.latest-stable.zip',
+    'woo-orders-tracking' => 'https://downloads.wordpress.org/plugin/woo-orders-tracking.latest-stable.zip',
+]);
+
 /**
  * Initialize WordPress Filesystem
  */
@@ -188,6 +197,11 @@ add_action('wp_ajax_nopriv_xepmarket2_plugin_zip', 'xepmarket2_plugin_zip_endpoi
  */
 function xepmarket2_get_github_plugin_zip_url($slug)
 {
+    // If it's an official plugin, return the direct download URL
+    if (isset(XEPMARKET2_OFFICIAL_PLUGIN_URLS[$slug])) {
+        return XEPMARKET2_OFFICIAL_PLUGIN_URLS[$slug];
+    }
+    
     if (!in_array($slug, XEPMARKET2_PLUGIN_ZIP_SLUGS, true)) {
         return null;
     }
@@ -269,7 +283,7 @@ function xepmarket2_ajax_prepare_plugins_sync() {
         wp_send_json_error(['message' => 'Invalid repo structure.']);
     }
 
-    // Get all plugin slugs
+    // Get all plugin slugs from GitHub repo
     $slugs = [];
     $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot'];
     foreach (scandir($repo_root) as $name) {
@@ -277,6 +291,13 @@ function xepmarket2_ajax_prepare_plugins_sync() {
         if (stripos($name, 'telegram') !== false && stripos($name, 'bot') !== false) continue;
         if (is_dir($repo_root . '/' . $name)) {
             $slugs[] = $name;
+        }
+    }
+
+    // Add official plugins that might not be in the GitHub repo
+    foreach (array_keys(XEPMARKET2_OFFICIAL_PLUGIN_URLS) as $official_slug) {
+        if (!in_array($official_slug, $slugs, true)) {
+            $slugs[] = $official_slug;
         }
     }
 
@@ -300,6 +321,37 @@ function xepmarket2_ajax_install_plugin_step() {
 
     $slug = isset($_POST['slug']) ? sanitize_text_field($_POST['slug']) : '';
     $repo_root = get_transient('xep_sync_repo_root');
+    
+    // Check if official download is preferred
+    if ($slug && isset(XEPMARKET2_OFFICIAL_PLUGIN_URLS[$slug])) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        
+        $url = XEPMARKET2_OFFICIAL_PLUGIN_URLS[$slug];
+        $temp_zip = download_url($url, 120);
+
+        if (is_wp_error($temp_zip)) {
+            wp_send_json_error(['message' => 'Official download failed for ' . $slug . ': ' . $temp_zip->get_error_message()]);
+        }
+
+        $dest = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . $slug;
+        
+        // Clean up existing plugin folder
+        if ($wp_filesystem->is_dir($dest)) {
+            $wp_filesystem->delete($dest, true);
+        }
+
+        // Unzip directly to plugins dir
+        $unzip = unzip_file($temp_zip, WP_PLUGIN_DIR);
+        @unlink($temp_zip);
+
+        if (is_wp_error($unzip)) {
+            wp_send_json_error(['message' => 'Official unzip failed for ' . $slug . ': ' . $unzip->get_error_message()]);
+        }
+
+        wp_send_json_success(['slug' => $slug, 'source' => 'official']);
+        return;
+    }
     
     if (!$slug || !$repo_root || !is_dir($repo_root)) {
         wp_send_json_error(['message' => 'Sync state lost or invalid slug.']);
