@@ -198,4 +198,107 @@ jQuery(document).ready(function ($) {
             }
         });
     });
+    
+    // Coupon Management Logic
+    var $couponsContainer = $('#xep-coupons-container');
+    var $couponsJsonInput = $('#xepmarket2_coupons_json');
+
+    function updateCouponsJson() {
+        var coupons = [];
+        $('.xep-coupon-row').each(function() {
+            var code = $(this).find('.coupon-code').val().trim();
+            var rate = $(this).find('.coupon-rate').val();
+            if (code !== '') {
+                coupons.push({
+                    code: code,
+                    rate: rate
+                });
+            }
+        });
+        $couponsJsonInput.val(JSON.stringify(coupons));
+    }
+
+    $('#xep-add-coupon').on('click', function() {
+        var rowHtml = '<div class="xep-coupon-row" style="display: flex; gap: 10px; align-items: center; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 10px; border: 1px solid var(--admin-border);">' +
+            '<div style="flex: 2;">' +
+            '<input type="text" class="coupon-code" value="" placeholder="CODE (e.g. ALPHA20)" />' +
+            '</div>' +
+            '<div style="flex: 1; position: relative;">' +
+            '<input type="number" class="coupon-rate" value="0" placeholder="Rate" step="0.01" />' +
+            '<span style="position: absolute; right: 10px; top: 15px; color: var(--admin-text-muted);">%</span>' +
+            '</div>' +
+            '<button type="button" class="xep-remove-coupon" style="background: #ff453a; color: #fff; border: none; border-radius: 8px; width: 35px; height: 35px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.3s;">' +
+            '<i class="fas fa-trash-alt"></i>' +
+            '</button>' +
+            '</div>';
+        $couponsContainer.append(rowHtml);
+        updateCouponsJson();
+    });
+
+    $couponsContainer.on('click', '.xep-remove-coupon', function() {
+        $(this).closest('.xep-coupon-row').fadeOut(300, function() {
+            $(this).remove();
+            updateCouponsJson();
+        });
+    });
+
+    $couponsContainer.on('input', '.coupon-code, .coupon-rate', function() {
+        updateCouponsJson();
+    });
+
+    // Legal Contracts Management Logic
+    var $contractsContainer = $('#xep-contracts-container');
+    var $contractsJsonInput = $('#xepmarket2_legal_contracts_json');
+
+    function updateContractsJson() {
+        var contracts = [];
+        $('.xep-contract-row').each(function() {
+            var name = $(this).find('.contract-name').val().trim();
+            var pageId = $(this).find('.contract-page-id').val();
+            var isRequired = $(this).find('.contract-required').is(':checked') ? '1' : '0';
+            
+            if (name !== '') {
+                contracts.push({
+                    name: name,
+                    page_id: pageId,
+                    required: isRequired
+                });
+            }
+        });
+        $contractsJsonInput.val(JSON.stringify(contracts));
+    }
+
+    $('#xep-add-contract').on('click', function() {
+        var $template = $('.xep-contract-row.template');
+        if ($template.length > 0) {
+            var $newRow = $template.clone().removeClass('template').show();
+            $newRow.css('display', 'flex'); // Ensure it displays as flex
+            $contractsContainer.append($newRow);
+            updateContractsJson();
+        }
+    });
+
+    $contractsContainer.on('click', '.xep-remove-contract', function() {
+        $(this).closest('.xep-contract-row').fadeOut(300, function() {
+            $(this).remove();
+            updateContractsJson();
+        });
+    });
+
+    $contractsContainer.on('input change', '.contract-name, .contract-page-id, .contract-required', function() {
+        updateContractsJson();
+        
+        // Update edit link dynamically
+        if ($(this).hasClass('contract-page-id')) {
+            var $row = $(this).closest('.xep-contract-row');
+            var pageId = $(this).val();
+            var $editBtn = $row.find('.xep-edit-contract');
+            
+            if (pageId > 0) {
+                $editBtn.attr('href', 'post.php?post=' + pageId + '&action=edit').css('display', 'flex');
+            } else {
+                $editBtn.hide();
+            }
+        }
+    });
 });

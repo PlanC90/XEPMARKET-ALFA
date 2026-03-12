@@ -329,3 +329,35 @@ input:checked+.xep-slider:before {
 .toplevel_page_xepmarket2-settings .update-nag {
     display: none !important;
 }
+
+/* Coupon Management UI */
+.xep-coupon-row {
+    transition: all 0.3s ease;
+    animation: slideIn 0.3s ease forwards;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.xep-coupon-row:hover {
+    border-color: var(--admin-primary) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.xep-remove-coupon:hover {
+    background: #ff2d20 !important;
+    transform: scale(1.1);
+}
+
+#xep-add-coupon:hover {
+    background: rgba(0, 242, 255, 0.2) !important;
+    border-style: solid !important;
+}

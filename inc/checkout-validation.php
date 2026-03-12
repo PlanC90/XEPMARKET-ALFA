@@ -8,15 +8,22 @@ add_action('woocommerce_review_order_before_submit', 'xepmarket2_add_checkout_pr
 function xepmarket2_add_checkout_privacy_policy_with_checkbox()
 {
     $privacy_url = get_privacy_policy_url() ?: '#';
+    $custom_label = get_option('xepmarket2_privacy_policy_label', __('Privacy Policy', 'xepmarket2'));
+    $is_required = get_option('xepmarket2_privacy_policy_required', '1') === '1';
+
     // Link class used for Modal trigger
-    $privacy_link = '<a href="' . esc_url($privacy_url) . '" class="xep-privacy-modal-trigger" style="color: #00f2ff !important; text-decoration: underline !important; font-weight: 700 !important; margin-left: 5px; display: inline; position: relative; z-index: 10;">' . __('Privacy Policy', 'xepmarket2') . '</a>';
+    $privacy_link = '<a href="' . esc_url($privacy_url) . '" class="xep-privacy-modal-trigger" style="color: #00f2ff !important; text-decoration: underline !important; font-weight: 700 !important; margin-left: 5px; display: inline; position: relative; z-index: 10;">' . esc_html($custom_label) . '</a>';
 
     $text = __('By completing your order, you agree to our:', 'xepmarket2') . ' ' . $privacy_link;
 
     echo '<div class="xep-privacy-policy-wrap" style="width: 100% !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 20px !important; background: rgba(255, 255, 255, 0.02) !important; margin: 15px 0 !important;">';
     echo '<label class="woocommerce-form__label woocommerce-form__label-for-checkbox checkbox" style="display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; justify-content: flex-start !important; padding: 25px !important; margin: 0 !important; gap: 15px !important; width: 100% !important; box-sizing: border-box !important;">';
-    echo '<input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox" name="xep_privacy_policy_acceptance" id="xep_privacy_policy_acceptance" value="1" style="width: 18px !important; height: 18px !important; min-width: 18px !important; max-width: 18px !important; margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; flex-grow: 0 !important; display: inline-block !important; position: relative !important; order: 1 !important; appearance: auto !important;" />';
-    echo '<span class="woocommerce-privacy-policy-text" style="display: inline-block !important; flex-grow: 1 !important; margin: 0 !important; padding: 0 !important; line-height: 1.4 !important; color: rgba(255, 255, 255, 0.85) !important; font-size: 15px !important; order: 2 !important; text-align: left !important;">' . $text . ' <abbr class="required" title="required" style="color: #ff453a !important; text-decoration: none !important; margin-left: 5px !important;">*</abbr></span>';
+    echo '<input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox" name="xep_privacy_policy_acceptance" id="xep_privacy_policy_acceptance" value="1" '.($is_required ? 'required' : '').' style="width: 18px !important; height: 18px !important; min-width: 18px !important; max-width: 18px !important; margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; flex-grow: 0 !important; display: inline-block !important; position: relative !important; order: 1 !important; appearance: auto !important;" />';
+    echo '<span class="woocommerce-privacy-policy-text" style="display: inline-block !important; flex-grow: 1 !important; margin: 0 !important; padding: 0 !important; line-height: 1.4 !important; color: rgba(255, 255, 255, 0.85) !important; font-size: 15px !important; order: 2 !important; text-align: left !important;">' . $text;
+    if ($is_required) {
+        echo ' <abbr class="required" title="required" style="color: #ff453a !important; text-decoration: none !important; margin-left: 5px !important;">*</abbr>';
+    }
+    echo '</span>';
     echo '</label></div>';
 
     // Disable default WooCommerce behavior for this block (avoid duplicate privacy text if WC tries to show one)
@@ -386,12 +393,23 @@ function xepmarket2_checkout_validation_js()
                 // B. Privacy Policy & Terms (Strict)
                 var xepAccepted = $('#xep_privacy_policy_acceptance').prop('checked');
                 var wcTerms = $('#terms').length ? $('#terms').prop('checked') : true; // If standard terms exist, they must be checked too
+                
+                var ppRequired = $('#xep_privacy_policy_acceptance').attr('required') !== undefined;
+                var ppLabel = <?php echo wp_json_encode(get_option('xepmarket2_privacy_policy_label', __('Privacy Policy', 'xepmarket2'))); ?>;
 
-                if (!xepAccepted) {
-                    issues.push('Privacy Policy');
+                if (ppRequired && !xepAccepted) {
+                    issues.push(ppLabel);
                 } else if (!wcTerms) {
                     issues.push('Terms and Conditions');
                 }
+
+                // B2. Custom Legal Contracts (Dynamic)
+                $('.xep-custom-contract-checkbox[required]').each(function() {
+                    if (!$(this).prop('checked')) {
+                        var cName = $(this).data('name') || 'Legal Agreement';
+                        issues.push(cName);
+                    }
+                });
 
                 // C. Wallet PC Check
                 var isPC = !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);

@@ -11,6 +11,7 @@ require_once get_template_directory() . '/inc/seo-config.php';
 require_once get_template_directory() . '/inc/ali-sync/helper.php';
 require_once get_template_directory() . '/inc/live-search.php';
 require_once get_template_directory() . '/inc/theme-updater.php';
+require_once get_template_directory() . '/inc/admin-cockpit.php';
 
 // Telegram order notifications (theme-integrated; loads when WooCommerce is active)
 add_action('init', function () {
@@ -393,6 +394,27 @@ function xepmarket2_disable_password_strength()
     }
 }
 add_action('wp_enqueue_scripts', 'xepmarket2_disable_password_strength', 99);
+
+/**
+ * AUTO-REGISTRATION: Force WooCommerce registration options and pre-check "Create an account" box
+ */
+function xepmarket2_setup_woocommerce_checkout_registration() {
+    if (!class_exists('WooCommerce')) return;
+
+    // 1. Force Enable Registration on Checkout
+    if (get_option('woocommerce_enable_signup_and_login_from_checkout') !== 'yes') {
+        update_option('woocommerce_enable_signup_and_login_from_checkout', 'yes');
+    }
+
+    // 2. Ensure Guest Checkout is enabled so both options (Guest/Register) are visible
+    if (get_option('woocommerce_enable_guest_checkout') !== 'yes') {
+        update_option('woocommerce_enable_guest_checkout', 'yes');
+    }
+}
+add_action('init', 'xepmarket2_setup_woocommerce_checkout_registration');
+
+// 3. Pre-check the "Create an account?" checkbox by default
+add_filter('woocommerce_create_account_default_checked', '__return_true');
 
 /**
  * ============================================================================
@@ -1463,6 +1485,221 @@ function xepmarket2_settings_init()
     // Affiliate (theme-integrated; same options as standalone plugin)
     register_setting('xepmarket2_settings_group', 'omnixep_affiliate_rate');
     register_setting('xepmarket2_settings_group', 'omnixep_affiliate_cookie_days');
+
+    // Coupons Settings
+    register_setting('xepmarket2_settings_group', 'xepmarket2_coupons_enabled');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_coupons_json', array(
+        'type' => 'string',
+        'sanitize_callback' => 'xepmarket2_sanitize_coupons_json',
+    ));
+
+    // Legal Contracts Settings
+    register_setting('xepmarket2_settings_group', 'xepmarket2_legal_contracts_json', array(
+        'type' => 'string',
+        'sanitize_callback' => 'xepmarket2_sanitize_contracts_json',
+    ));
+    register_setting('xepmarket2_settings_group', 'xepmarket2_privacy_policy_label');
+    register_setting('xepmarket2_settings_group', 'xepmarket2_privacy_policy_required');
+}
+
+/**
+ * Sanitize contracts JSON
+ */
+function xepmarket2_sanitize_contracts_json($input) {
+    if (empty($input)) return '[]';
+    $decoded = json_decode(wp_unslash($input), true);
+    if (!is_array($decoded)) return '[]';
+    
+    $clean = array();
+    foreach ($decoded as $contract) {
+        if (!isset($contract['name'])) continue;
+        $clean[] = array(
+            'name'     => sanitize_text_field($contract['name']),
+            'page_id'  => is_numeric($contract['page_id']) ? intval($contract['page_id']) : 0,
+            'required' => (isset($contract['required']) && $contract['required'] == '1') ? '1' : '0',
+        );
+    }
+    return wp_json_encode($clean);
+}
+
+/**
+ * Sanitize coupons JSON
+ */
+function xepmarket2_sanitize_coupons_json($input) {
+    if (empty($input)) return '[]';
+    $decoded = json_decode(wp_unslash($input), true);
+    if (!is_array($decoded)) return '[]';
+    
+    $clean = array();
+    foreach ($decoded as $coupon) {
+        if (!isset($coupon['code'])) continue;
+        $clean[] = array(
+            'code'  => sanitize_text_field($coupon['code']),
+            'rate'  => is_numeric($coupon['rate']) ? floatval($coupon['rate']) : 0,
+        );
+    }
+    return wp_json_encode($clean);
+}
+
+/**
+ * WooCommerce Integration: Intercept coupon code validation to support theme-defined coupons
+ */
+add_filter('woocommerce_get_shop_coupon_data', 'xepmarket2_apply_theme_coupons', 10, 2);
+function xepmarket2_apply_theme_coupons($data, $code) {
+    if (get_option('xepmarket2_coupons_enabled', '0') !== '1') {
+        return $data;
+    }
+
+    $coupons_json = get_option('xepmarket2_coupons_json', '[]');
+    $coupons = json_decode($coupons_json, true);
+    if (!is_array($coupons)) {
+        return $data;
+    }
+
+    foreach ($coupons as $coupon) {
+        if (strcasecmp($coupon['code'], $code) === 0) {
+            // Virtual WooCommerce coupon data
+            return array(
+                'id'                         => 12345678, // Virtual ID
+                'type'                       => 'percent',
+                'amount'                     => floatval($coupon['rate']),
+                'coupon_amount'              => floatval($coupon['rate']),
+                'discount_type'              => 'percent',
+                'individual_use'             => false,
+                'product_ids'                => array(),
+                'exclude_product_ids'        => array(),
+                'usage_limit'                => 0,
+                'usage_limit_per_user'       => 0,
+                'limit_usage_to_x_items'     => 0,
+                'expiry_date'                => '',
+                'free_shipping'              => false,
+                'product_categories'         => array(),
+                'exclude_product_categories' => array(),
+                'exclude_sale_items'         => false,
+                'minimum_amount'             => '',
+                'maximum_amount'             => '',
+                'customer_email'             => array(),
+                'virtual'                    => true // Identification for custom logic
+            );
+        }
+    }
+
+    return $data;
+}
+
+/**
+ * WooCommerce Integration: Force enable coupons on front-end if theme coupons are active
+ */
+add_filter('woocommerce_coupons_enabled', function($enabled) {
+    if (get_option('xepmarket2_coupons_enabled', '0') === '1') {
+        return true;
+    }
+    return $enabled;
+});
+
+/**
+ * WooCommerce Integration: Display custom legal contracts at checkout
+ */
+add_action('woocommerce_review_order_before_submit', 'xepmarket2_display_checkout_contracts', 10);
+function xepmarket2_display_checkout_contracts() {
+    $contracts_json = get_option('xepmarket2_legal_contracts_json', '[]');
+    $contracts = json_decode($contracts_json, true);
+    if (empty($contracts) || !is_array($contracts)) return;
+
+    foreach ($contracts as $index => $contract) {
+        $id = "xep_contract_{$index}";
+        $modal_id = "xep_contract_modal_{$index}";
+        $label_text = esc_html($contract['name']);
+        
+        if ($contract['page_id'] > 0) {
+            $label_text = sprintf('<a href="#" class="xep-custom-contract-trigger" data-modal="%s" style="color: #00f2ff !important; text-decoration: underline !important; font-weight: 700 !important; margin-left: 5px;">%s</a>', esc_attr($modal_id), esc_html($contract['name']));
+        }
+
+        echo '<div class="xep-privacy-policy-wrap" style="width: 100% !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 20px !important; background: rgba(255, 255, 255, 0.02) !important; margin: 15px 0 !important;">';
+        echo '<label class="woocommerce-form__label woocommerce-form__label-for-checkbox checkbox" style="display: flex !important; align-items: center !important; padding: 25px !important; margin: 0 !important; gap: 15px !important; width: 100% !important; box-sizing: border-box !important; cursor: pointer;">';
+        echo '<input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox xep-custom-contract-checkbox" name="'.esc_attr($id).'" id="'.esc_attr($id).'" value="1" '.(($contract['required'] == '1') ? 'required' : '').' data-name="'.esc_attr($contract['name']).'" style="width: 18px !important; height: 18px !important; margin: 0 !important; flex-shrink: 0;" />';
+        echo '<span style="display: inline-block !important; flex-grow: 1 !important; margin: 0 !important; color: rgba(255, 255, 255, 0.85) !important; font-size: 15px !important; text-align: left !important;">';
+        echo sprintf(__('By completing your order, you agree to: %s', 'xepmarket2'), $label_text);
+        if ($contract['required'] == '1') {
+            echo ' <abbr class="required" title="required" style="color: #ff453a !important; text-decoration: none !important; margin-left: 5px !important;">*</abbr>';
+        }
+        echo '</span>';
+        echo '</label></div>';
+    }
+}
+
+/**
+ * WooCommerce Integration: Render modals for custom legal contracts
+ */
+add_action('wp_footer', 'xepmarket2_render_custom_contract_modals', 60);
+function xepmarket2_render_custom_contract_modals() {
+    if (!is_checkout() || is_wc_endpoint_url('order-received')) return;
+
+    $contracts_json = get_option('xepmarket2_legal_contracts_json', '[]');
+    $contracts = json_decode($contracts_json, true);
+    if (empty($contracts) || !is_array($contracts)) return;
+
+    foreach ($contracts as $index => $contract) {
+        $modal_id = "xep_contract_modal_{$index}";
+        $page_id = $contract['page_id'];
+        if ($page_id <= 0) continue;
+        ?>
+        <div id="<?php echo esc_attr($modal_id); ?>" class="xep-privacy-overlay xep-custom-contract-modal" style="display:none;">
+            <div class="xep-modal-container">
+                <div class="xep-modal-header">
+                    <h2><?php echo esc_html($contract['name']); ?></h2>
+                    <button type="button" class="xep-modal-close-btn">&times;</button>
+                </div>
+                <div class="xep-modal-body">
+                    <?php
+                    $post = get_post($page_id);
+                    if ($post) {
+                        echo apply_filters('the_content', $post->post_content);
+                    } else {
+                        echo '<p style="text-align:center; padding: 50px 0;">' . __('Contract content not found.', 'xepmarket2') . '</p>';
+                    }
+                    ?>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+    ?>
+    <script>
+    (function($){
+        $(document).on('click', '.xep-custom-contract-trigger', function(e){
+            e.preventDefault();
+            var modalId = $(this).data('modal');
+            $('#' + modalId).css('display', 'flex').hide().fadeIn(200);
+            $('body').css('overflow', 'hidden');
+        });
+        $(document).on('click', '.xep-custom-contract-modal .xep-modal-close-btn, .xep-custom-contract-modal', function(e){
+            if($(e.target).closest('.xep-modal-container').length && !$(e.target).hasClass('xep-modal-close-btn')) return;
+            $(this).closest('.xep-custom-contract-modal').fadeOut(200);
+            $('body').css('overflow', 'auto');
+        });
+    })(jQuery);
+    </script>
+    <?php
+}
+
+/**
+ * WooCommerce Integration: Validate custom legal contracts at checkout
+ */
+add_action('woocommerce_checkout_process', 'xepmarket2_validate_checkout_contracts');
+function xepmarket2_validate_checkout_contracts() {
+    $contracts_json = get_option('xepmarket2_legal_contracts_json', '[]');
+    $contracts = json_decode($contracts_json, true);
+    if (empty($contracts) || !is_array($contracts)) return;
+
+    foreach ($contracts as $index => $contract) {
+        if ($contract['required'] == '1') {
+            $id = "xep_contract_{$index}";
+            if (!isset($_POST[$id]) || empty($_POST[$id])) {
+                wc_add_notice(sprintf(__('Please accept the %s to proceed.', 'woocommerce'), '<strong>' . esc_html($contract['name']) . '</strong>'), 'error');
+            }
+        }
+    }
 }
 
 function xepmarket2_sanitize_shipping_zones_json($input) {
@@ -1631,6 +1868,12 @@ function xepmarket2_settings_page()
                     </div>
                     <div class="xep-nav-item" data-tab="tab-shipping">
                         <i class="fas fa-truck"></i> Shipping Rates & Limits
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-coupons">
+                        <i class="fas fa-ticket-alt"></i> Coupons
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-legal">
+                        <i class="fas fa-file-contract"></i> Legal Contracts
                     </div>
                     <div class="xep-nav-item" data-tab="tab-seo">
                         <i class="fas fa-search"></i> SEO & AI Settings
@@ -1801,6 +2044,167 @@ function xepmarket2_settings_page()
                                         value="<?php echo esc_attr(xepmarket2_get_option_fast('xepmarket2_color_text_muted', '#a0a0b8')); ?>"
                                         style="height: 50px;" />
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Legal Contracts -->
+                    <div id="tab-legal" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Checkout Agreements & Contracts</h3>
+                            <p class="description" style="margin-bottom: 25px;">Manage legal documents (Terms, Privacy Policy, etc.) that customers must accept before placing an order.</p>
+
+                            <!-- Standard Privacy Policy Section -->
+                            <div class="xep-section-card" style="background: rgba(0, 242, 255, 0.03); border: 1px solid rgba(0, 242, 255, 0.1); margin-bottom: 30px; padding: 20px;">
+                                <h4 style="margin-top: 0; color: #00f2ff; display: flex; align-items: center; gap: 8px;"><i class="fas fa-shield-alt"></i> Standard Privacy Policy</h4>
+                                <div class="xep-grid-2">
+                                    <div class="xep-form-group">
+                                        <label>Checkbox Label Text</label>
+                                        <input type="text" name="xepmarket2_privacy_policy_label" value="<?php echo esc_attr(get_option('xepmarket2_privacy_policy_label', 'Privacy Policy')); ?>" placeholder="Privacy Policy" />
+                                        <p class="description">How the link appears in the agreement text.</p>
+                                    </div>
+                                    <div class="xep-form-group" style="display: flex; align-items: center; gap: 15px; padding-top: 25px;">
+                                        <label class="xep-switch">
+                                            <input type="checkbox" name="xepmarket2_privacy_policy_required" value="1" <?php checked(1, get_option('xepmarket2_privacy_policy_required', '1')); ?> />
+                                            <span class="xep-slider"></span>
+                                        </label>
+                                        <span style="font-size: 14px; font-weight: 600; color: var(--text-muted);">Required for Checkout</span>
+                                    </div>
+                                </div>
+                                <p class="description" style="margin-top: 10px;">Note: This uses the official WordPress Privacy Policy page. Link: <a href="<?php echo admin_url('options-privacy.php'); ?>" target="_blank" style="color: #00f2ff;">Change Policy Page</a></p>
+                            </div>
+
+                            <div class="xep-form-group">
+                                <label>Contracts List</label>
+                                <div id="xep-contracts-container" style="display: flex; flex-direction: column; gap: 12px;">
+                                    <?php
+                                    $contracts_json = get_option('xepmarket2_legal_contracts_json', '[]');
+                                    $contracts = json_decode($contracts_json, true);
+                                    if (!is_array($contracts)) $contracts = array();
+                                    $all_pages = get_pages();
+                                    ?>
+                                    
+                                    <!-- Hidden Template for JS Cloning -->
+                                    <div class="xep-contract-row template" style="display: none; gap: 10px; align-items: center; background: rgba(255,255,255,0.02); padding: 15px; border-radius: 12px; border: 1px solid var(--admin-border);">
+                                        <div style="flex: 2;">
+                                            <input type="text" class="contract-name" value="" placeholder="Name (e.g. Terms of Service)" />
+                                        </div>
+                                        <div style="flex: 2;">
+                                            <select class="contract-page-id">
+                                                <option value="0">Select Page...</option>
+                                                <?php foreach ($all_pages as $page): ?>
+                                                    <option value="<?php echo $page->ID; ?>"><?php echo esc_html($page->post_title); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                                                <span style="font-size: 10px; color: var(--admin-text-muted); text-transform: uppercase;">Required</span>
+                                                <label class="xep-switch" style="transform: scale(0.8);">
+                                                    <input type="checkbox" class="contract-required" value="1" />
+                                                    <span class="xep-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div style="display: flex; gap: 5px;">
+                                                <a href="#" class="xep-edit-contract" target="_blank" style="display: none; background: var(--admin-primary); color: #000; border: none; border-radius: 8px; width: 35px; height: 35px; align-items: center; justify-content: center; transition: 0.3s; text-decoration: none;">
+                                                    <i class="fas fa-pencil-alt"></i>
+                                                </a>
+                                                <button type="button" class="xep-remove-contract" style="background: #ff453a; color: #fff; border: none; border-radius: 8px; width: 35px; height: 35px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.3s;">
+                                                    <i class="fas fa-trash-alt"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    
+                                    <?php
+                                    foreach ($contracts as $contract): ?>
+                                        <div class="xep-contract-row" style="display: flex; gap: 10px; align-items: center; background: rgba(255,255,255,0.02); padding: 15px; border-radius: 12px; border: 1px solid var(--admin-border);">
+                                            <div style="flex: 2;">
+                                                <input type="text" class="contract-name" value="<?php echo esc_attr($contract['name']); ?>" placeholder="Name (e.g. Terms of Service)" />
+                                            </div>
+                                            <div style="flex: 2;">
+                                                <select class="contract-page-id">
+                                                    <option value="0">Select Page...</option>
+                                                    <?php foreach ($all_pages as $page): ?>
+                                                        <option value="<?php echo $page->ID; ?>" <?php selected($contract['page_id'], $page->ID); ?>><?php echo esc_html($page->post_title); ?></option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                                                <span style="font-size: 10px; color: var(--admin-text-muted); text-transform: uppercase;">Required</span>
+                                                <label class="xep-switch" style="transform: scale(0.8);">
+                                                    <input type="checkbox" class="contract-required" value="1" <?php checked('1', $contract['required']); ?> />
+                                                    <span class="xep-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div style="display: flex; gap: 5px;">
+                                                <?php 
+                                                $edit_url = ($contract['page_id'] > 0) ? get_edit_post_link($contract['page_id']) : '#';
+                                                $display = ($contract['page_id'] > 0) ? 'flex' : 'none';
+                                                ?>
+                                                <a href="<?php echo esc_url($edit_url); ?>" class="xep-edit-contract" target="_blank" style="display: <?php echo $display; ?>; background: var(--admin-primary); color: #000; border: none; border-radius: 8px; width: 35px; height: 35px; align-items: center; justify-content: center; transition: 0.3s; text-decoration: none;">
+                                                    <i class="fas fa-pencil-alt"></i>
+                                                </a>
+                                                <button type="button" class="xep-remove-contract" style="background: #ff453a; color: #fff; border: none; border-radius: 8px; width: 35px; height: 35px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.3s;">
+                                                    <i class="fas fa-trash-alt"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                
+                                <button type="button" id="xep-add-contract" style="margin-top: 20px; background: rgba(0, 242, 255, 0.1); color: var(--admin-primary); border: 1px dashed var(--admin-primary); border-radius: 12px; padding: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.3s; width: 100%;">
+                                    <i class="fas fa-plus"></i> Add New Contract
+                                </button>
+                                <input type="hidden" name="xepmarket2_legal_contracts_json" id="xepmarket2_legal_contracts_json" value="<?php echo esc_attr($contracts_json); ?>" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Coupons -->
+                    <div id="tab-coupons" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3>Coupon Management</h3>
+                            <p class="description" style="margin-bottom: 25px;">Enable or disable coupon functionality and define custom discount codes for your customers.</p>
+                            
+                            <div class="xep-form-group"
+                                style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--admin-border); padding-bottom: 20px; margin-bottom: 20px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 16px;">Enable Coupons</div>
+                                    <div class="description">Activate custom discount codes at checkout.</div>
+                                </div>
+                                <label class="xep-switch">
+                                    <input type="hidden" name="xepmarket2_coupons_enabled" value="0" />
+                                    <input type="checkbox" name="xepmarket2_coupons_enabled" value="1" <?php checked(1, get_option('xepmarket2_coupons_enabled', '0'), true); ?> />
+                                    <span class="xep-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="xep-form-group">
+                                <label>Define Coupons</label>
+                                <div id="xep-coupons-container" style="display: flex; flex-direction: column; gap: 12px;">
+                                    <?php
+                                    $coupons_json = get_option('xepmarket2_coupons_json', '[]');
+                                    $coupons = json_decode($coupons_json, true);
+                                    if (!is_array($coupons)) $coupons = array();
+                                    
+                                    foreach ($coupons as $coupon): ?>
+                                        <div class="xep-coupon-row" style="display: flex; gap: 10px; align-items: center; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 10px; border: 1px solid var(--admin-border);">
+                                            <div style="flex: 2;">
+                                                <input type="text" class="coupon-code" value="<?php echo esc_attr($coupon['code']); ?>" placeholder="CODE (e.g. ALPHA20)" />
+                                            </div>
+                                            <div style="flex: 1; position: relative;">
+                                                <input type="number" class="coupon-rate" value="<?php echo esc_attr($coupon['rate']); ?>" placeholder="Rate" step="0.01" />
+                                                <span style="position: absolute; right: 10px; top: 15px; color: var(--admin-text-muted);">%</span>
+                                            </div>
+                                            <button type="button" class="xep-remove-coupon" style="background: #ff453a; color: #fff; border: none; border-radius: 8px; width: 35px; height: 35px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.3s;">
+                                                <i class="fas fa-trash-alt"></i>
+                                            </button>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="button" id="xep-add-coupon" style="margin-top: 20px; background: rgba(0, 242, 255, 0.1); color: var(--admin-primary); border: 1px dashed var(--admin-primary); border-radius: 12px; padding: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.3s; width: 100%;">
+                                    <i class="fas fa-plus"></i> Add New Coupon
+                                </button>
+                                <input type="hidden" name="xepmarket2_coupons_json" id="xepmarket2_coupons_json" value="<?php echo esc_attr($coupons_json); ?>" />
                             </div>
                         </div>
                     </div>
@@ -3177,7 +3581,7 @@ function xepmarket2_settings_page()
 
                             <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
                                 <i class="fas fa-info-circle"></i>
-                                <strong>Sira No</strong> girerek sirayin. Ayni sira numarasi + <strong>2/1</strong> genislik olan alanlar <strong>yan yana</strong> gorunur. <strong>2/2 = tam satir</strong>. Kaydet sonrasi uygulanir.
+                                Sort fields by entering a <strong>Priority No</strong>. Fields with the same priority and <strong>2/1</strong> width will appear <strong>side-by-side</strong>. <strong>2/2 = Full Row</strong>. Changes apply after saving.
                             </p>
 
                             <style>
@@ -3203,7 +3607,7 @@ function xepmarket2_settings_page()
                                     <div class="<?php echo $cls; ?>">
                                         <?php if ($left['type'] === 'standard'): $fid = $left['id']; $fdata = $sorted_fields[$fid]; ?>
                                         <div class="xep-field-card">
-                                            <div class="xep-order-badge" title="Sira No">
+                                            <div class="xep-order-badge" title="Priority No">
                                                 <input type="number" name="xepmarket2_chk_order_<?php echo esc_attr($fid); ?>" value="<?php echo esc_attr($left['order']); ?>" min="1" max="99" />
                                             </div>
                                             <div style="flex:1;min-width:0;">
@@ -3220,7 +3624,7 @@ function xepmarket2_settings_page()
                                         </div>
                                         <?php else: $cf = $left; $cfid = esc_attr($cf['id']); ?>
                                         <div class="xep-field-card xep-cf-row" data-cf-id="<?php echo $cfid; ?>">
-                                            <div class="xep-order-badge" title="Sira No">
+                                            <div class="xep-order-badge" title="Priority No">
                                                 <input type="number" class="xep-cf-order" value="<?php echo esc_attr($cf['order']); ?>" min="1" max="99" />
                                             </div>
                                             <div style="flex:1;min-width:0;">
@@ -3242,7 +3646,7 @@ function xepmarket2_settings_page()
                                     <div>
                                         <?php if ($right['type'] === 'standard'): $fid = $right['id']; $fdata = $sorted_fields[$fid]; ?>
                                         <div class="xep-field-card">
-                                            <div class="xep-order-badge" title="Sira No">
+                                            <div class="xep-order-badge" title="Priority No">
                                                 <input type="number" name="xepmarket2_chk_order_<?php echo esc_attr($fid); ?>" value="<?php echo esc_attr($right['order']); ?>" min="1" max="99" />
                                             </div>
                                             <div style="flex:1;min-width:0;">
@@ -3259,7 +3663,7 @@ function xepmarket2_settings_page()
                                         </div>
                                         <?php else: $cf = $right; $cfid = esc_attr($cf['id']); ?>
                                         <div class="xep-field-card xep-cf-row" data-cf-id="<?php echo $cfid; ?>">
-                                            <div class="xep-order-badge" title="Sira No">
+                                            <div class="xep-order-badge" title="Priority No">
                                                 <input type="number" class="xep-cf-order" value="<?php echo esc_attr($cf['order']); ?>" min="1" max="99" />
                                             </div>
                                             <div style="flex:1;min-width:0;">
