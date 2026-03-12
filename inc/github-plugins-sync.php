@@ -301,6 +301,12 @@ function xepmarket2_ajax_prepare_plugins_sync() {
         }
     }
 
+    // PRIORITY: Ensure 'woocommerce' is always first in the installation queue
+    if (($key = array_search('woocommerce', $slugs)) !== false) {
+        unset($slugs[$key]);
+        array_unshift($slugs, 'woocommerce');
+    }
+
     // Store state in transient for Step 2
     set_transient('xep_sync_repo_root', $repo_root, 600);
     set_transient('xep_sync_temp_dir', $temp_dir, 600);
