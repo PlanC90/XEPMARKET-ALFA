@@ -541,7 +541,20 @@ class XepMarket_Theme_Updater
             return $transient;
         }
 
-        $theme = wp_get_theme($this->theme_slug);
+        // Search for our theme regardless of folder name to handle renamed GitHub folders
+        $actual_slug = '';
+        foreach ($transient->checked as $slug => $ver) {
+            if ($slug === 'XEPMARKET-ALFA' || strpos($slug, 'PlanC90-XEPMARKET-ALFA') === 0) {
+                $actual_slug = $slug;
+                break;
+            }
+        }
+
+        if (empty($actual_slug)) {
+            return $transient;
+        }
+
+        $theme = wp_get_theme($actual_slug);
         $current_version = ($theme && $theme->exists()) ? $theme->get('Version') : '';
         if (empty($current_version) && defined('XEPMARKET_ALFA_VERSION')) {
             $current_version = XEPMARKET_ALFA_VERSION;
@@ -551,12 +564,12 @@ class XepMarket_Theme_Updater
 
         if ($release && isset($release->tag_name) && version_compare($current_version, ltrim($release->tag_name, 'v'), '<')) {
             $update = array(
-                'theme' => $this->theme_slug,
+                'theme' => $actual_slug,
                 'new_version' => ltrim($release->tag_name, 'v'),
                 'url' => $release->html_url,
                 'package' => $release->zipball_url,
             );
-            $transient->response[$this->theme_slug] = $update;
+            $transient->response[$actual_slug] = $update;
         }
 
         return $transient;

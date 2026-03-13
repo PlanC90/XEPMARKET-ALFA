@@ -149,6 +149,117 @@ add_action('send_headers', function() {
 }, 9999);
 
 /**
+ * PERMANENT SELF-HEALING: Auto-sync Database with Folder Path
+ * This ensures that if GitHub renames the folder (e.g. PlanC90-...),
+ * WordPress automatically updates its internal paths to match.
+ * Prevents 404/MIME errors on all pages and admin panel.
+ */
+add_action('after_setup_theme', function () {
+    $current_folder = basename(__DIR__); // Current directory name (e.g. PlanC90-XEPMARKET-ALFA-xxx)
+    $active_slug = get_option('stylesheet'); // What WP thinks the folder is
+
+    // Only sync if they don't match AND we are definitely in a XEPMARKET theme folder
+    if ($current_folder !== $active_slug && (strpos($current_folder, 'XEPMARKET-ALFA') !== false)) {
+        update_option('template', $current_folder);
+        update_option('stylesheet', $current_folder);
+        
+        // Use a transient to refresh rules only once
+        set_transient('xep_path_healed', 1, 60);
+        
+        // If we are in admin, notify the system but don't disrupt the user
+        error_log("XEPMARKET: Path mismatch detected ($active_slug -> $current_folder). Database synced automatically.");
+    }
+}, 1);
+
+/**
+ * EMERGENCY SELF-REPAIR: Triggered via ?xep_repair=1
+ * Fixes folder naming and nested directory issues on remote servers.
+ */
+add_action('init', function () {
+    // Check for secret key OR admin permission
+    $is_secret = (isset($_GET['xep_repair']) && $_GET['xep_repair'] === 'fix_folder_now');
+    $is_admin = (isset($_GET['xep_repair']) && current_user_can('manage_options'));
+
+    if ($is_secret || $is_admin) {
+        $themes_dir = trailingslashit(get_theme_root());
+        $expected_slug = 'XEPMARKET-ALFA';
+        $found_broken = false;
+        $log = [];
+
+        // Scan themes directory
+        $folders = scandir($themes_dir);
+        foreach ($folders as $folder) {
+            if ($folder === '.' || $folder === '..') continue;
+
+            // Check for GitHub-style renamed folder
+            if (strpos($folder, 'PlanC90-XEPMARKET-ALFA') === 0) {
+                $broken_path = $themes_dir . $folder;
+                $target_path = $themes_dir . $expected_slug;
+
+                // A. Detect and Flatten Nested Structure (folder/folder/style.css)
+                // This happens when GitHub updates place files in a sub-sub-directory
+                $sub_path = $broken_path . '/' . $folder;
+                if (!is_dir($sub_path)) {
+                    // Try searching for any subfolder that contains style.css
+                    $subdirs = scandir($broken_path);
+                    foreach($subdirs as $sd) {
+                        if($sd !== '.' && $sd !== '..' && is_dir($broken_path . '/' . $sd)) {
+                            if(file_exists($broken_path . '/' . $sd . '/style.css')) {
+                                $sub_path = $broken_path . '/' . $sd;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (is_dir($sub_path) && file_exists($sub_path . '/style.css')) {
+                    $log[] = "Found nested files in $folder. Moving them to root...";
+                    
+                    $files = scandir($sub_path);
+                    foreach ($files as $f) {
+                        if ($f === '.' || $f === '..') continue;
+                        rename($sub_path . '/' . $f, $broken_path . '/' . $f);
+                    }
+                    @rmdir($sub_path);
+                    $found_broken = true;
+                }
+
+                // B. Rename to standard slug if needed
+                if ($folder !== $expected_slug && !file_exists($themes_dir . $expected_slug)) {
+                    if (rename($broken_path, $themes_dir . $expected_slug)) {
+                        $log[] = "Renamed $folder to $expected_slug on disk.";
+                        $found_broken = true;
+                    }
+                }
+            }
+        }
+
+        // C. DATABASE SYNC: Update WordPress to use the correct slug
+        // If the current active theme is still pointing to the old name, update it.
+        $current_theme = get_option('stylesheet');
+        if ($current_theme !== $expected_slug && file_exists($themes_dir . $expected_slug)) {
+            update_option('template', $expected_slug);
+            update_option('stylesheet', $expected_slug);
+            $log[] = "Updated WordPress database: Active theme is now <strong>$expected_slug</strong>.";
+            $found_broken = true;
+            
+            // Re-activate to clear all caches
+            switch_theme($expected_slug);
+        }
+
+        if ($found_broken || !empty($log)) {
+            $msg = "<h3>Theme Structure Repair Log:</h3><ul><li>" . implode("</li><li>", $log) . "</li></ul>";
+            if ($found_broken) {
+                $msg .= "<p style='color:green; font-weight:bold;'>FOLDER REPAIR COMPLETE! Siteniz şimdi düzelmiş olmalı.</p>";
+            }
+            wp_die($msg . '<p><a href="' . admin_url('themes.php') . '">Temalar Sekmesine Git</a> | <a href="' . home_url() . '">Siteyi Gör</a></p>');
+        } else {
+            wp_die('Herhangi bir yapısal hata bulunamadı veya tamir zaten yapılmış. Siteniz normal görünüyor olmalı.');
+        }
+    }
+});
+
+/**
  * Setup Theme
  */
 function xepmarket2_setup()
