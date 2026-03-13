@@ -123,6 +123,32 @@ add_action('after_switch_theme', function () {
 });
 
 /**
+ * FAILSAFE: Content Security Policy for Swap Page
+ * Overrides restrictive plugin headers if they don't explicitly allow StealthEX.
+ * This ensures the widget works automatically on all sites using this theme.
+ */
+add_action('send_headers', function() {
+    // We check if we are on the swap page or if it's the swap request
+    // Since is_page() might be too early here, we check the request URI
+    $request_uri = $_SERVER['REQUEST_URI'];
+    if (strpos($request_uri, '/swap') !== false) {
+        $csp = "default-src 'self'; " .
+               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.qrserver.com https://cdn.brevo.com https://cdn.by.wonderpush.com https://sibautomation.com; " .
+               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; " .
+               "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; " .
+               "img-src 'self' data: https: http:; " .
+               "connect-src 'self' https://api.omnixep.com https://api.coingecko.com https://mexc.com https://dextrade.com https://in-automate.brevo.com; " .
+               "frame-src 'self' https://stealthex.io; " .
+               "frame-ancestors 'self'; " .
+               "base-uri 'self'; " .
+               "form-action 'self';";
+        
+        header("Content-Security-Policy: " . $csp, true);
+        header("Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(self \"https://stealthex.io\")", true);
+    }
+}, 9999);
+
+/**
  * Setup Theme
  */
 function xepmarket2_setup()

@@ -50,9 +50,8 @@ class XepMarket_Theme_Updater
 
     public function __construct()
     {
-        // Use active theme stylesheet slug (matches update_themes transient keys)
-        $active_theme = wp_get_theme();
-        $this->theme_slug = ($active_theme && $active_theme->exists()) ? $active_theme->get_stylesheet() : 'XEPMARKET-ALFA';
+        // FORCE standard slug to avoid 404/MIME errors
+        $this->theme_slug = 'XEPMARKET-ALFA';
         $this->repo_user = 'PlanC90';
         $this->repo_name = 'XEPMARKET-ALFA';
 
@@ -572,13 +571,11 @@ class XepMarket_Theme_Updater
             return $source;
         }
 
-        // Github ZIP usually has one root folder: e.g. RepoName-CommitHash
-        // We need to return the folder inside it that actually contains style.css
         $source_files = $wp_filesystem->dirlist($source);
         if ($source_files) {
             foreach ($source_files as $file) {
-                if ($file['type'] === 'd') {
-                    // Check if standard location has style.css
+                // If we find any directory that looks like a GitHub repo folder
+                if ($file['type'] === 'd' && (strpos($file['name'], $this->repo_name) !== false || strpos($file['name'], $this->repo_user) !== false)) {
                     $potential_theme_dir = trailingslashit($source) . $file['name'];
                     if ($wp_filesystem->exists(trailingslashit($potential_theme_dir) . 'style.css')) {
                         return trailingslashit($potential_theme_dir);
@@ -587,11 +584,6 @@ class XepMarket_Theme_Updater
             }
         }
         
-        // If style.css is right at the root of the extracted zip
-        if ($wp_filesystem->exists(trailingslashit($source) . 'style.css')) {
-            return trailingslashit($source);
-        }
-
         return $source;
     }
 }
