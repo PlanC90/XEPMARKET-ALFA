@@ -3743,41 +3743,70 @@ function xepmarket2_settings_page()
                                     });
                                     return list;
                                 }
+                                // Cache all cards on load to prevent loss
+                                var ALL_CARDS = Array.from(G.querySelectorAll('.xep-field-card'));
+                                
                                 function reorder(){
-                                    var cards=collect();
-                                    cards.sort(function(a,b){return a.order!==b.order?a.order-b.order:0;});
-                                    var cols=[];
-                                    var i=0;
-                                    while(i<cards.length){
-                                        var c=cards[i];
-                                        if(c.width==='full'){
-                                            var d=document.createElement('div');d.className='xep-field-full';d.appendChild(c.el);cols.push(d);i++;
-                                        } else if(i+1<cards.length && cards[i+1].width==='half' && cards[i+1].order===c.order){
-                                            var dL=document.createElement('div');dL.appendChild(c.el);cols.push(dL);
-                                            var dR=document.createElement('div');dR.appendChild(cards[i+1].el);cols.push(dR);
-                                            i+=2;
+                                    // Save focus
+                                    var activeEl = document.activeElement;
+                                    var focusPath = activeEl ? { name: activeEl.name, class: activeEl.className, value: activeEl.value } : null;
+                                    var selStart = activeEl ? activeEl.selectionStart : null;
+
+                                    // Sort based on current inputs
+                                    var sorted = ALL_CARDS.map(function(el){
+                                        var ni = el.querySelector('input[type=number]');
+                                        var ri = el.querySelector('input[type=radio]:checked');
+                                        return { el: el, order: parseInt(ni.value,10)||99, width: ri?ri.value:'half' };
+                                    }).sort(function(a,b){ return a.order - b.order; });
+
+                                    var frag = document.createDocumentFragment();
+                                    var i = 0;
+                                    while(i < sorted.length){
+                                        var c = sorted[i];
+                                        if(c.width === 'full'){
+                                            var d = document.createElement('div'); d.className = 'xep-field-full';
+                                            d.appendChild(c.el); frag.appendChild(d);
+                                            i++;
+                                        } else if(i+1 < sorted.length && sorted[i+1].width === 'half' && sorted[i+1].order === c.order){
+                                            var dL = document.createElement('div'); dL.appendChild(c.el); frag.appendChild(dL);
+                                            var dR = document.createElement('div'); dR.appendChild(sorted[i+1].el); frag.appendChild(dR);
+                                            i += 2;
                                         } else {
-                                            var dS=document.createElement('div');dS.appendChild(c.el);cols.push(dS);
-                                            cols.push(document.createElement('div'));
+                                            var dS = document.createElement('div'); dS.appendChild(c.el); frag.appendChild(dS);
+                                            frag.appendChild(document.createElement('div')); // filler
                                             i++;
                                         }
                                     }
-                                    G.style.opacity='0.4';
-                                    setTimeout(function(){
-                                        while(G.firstChild)G.removeChild(G.firstChild);
-                                        cols.forEach(function(col){G.appendChild(col);});
-                                        G.style.opacity='1';
-                                        G.querySelectorAll('.xep-width-selector').forEach(styleBtn);
-                                    },120);
+
+                                    // Efficient Clear and Append
+                                    while(G.firstChild) G.removeChild(G.firstChild);
+                                    G.appendChild(frag);
+
+                                    // Restore focus
+                                    if(focusPath){
+                                        var refocused = null;
+                                        if(focusPath.name) refocused = G.querySelector('[name="'+focusPath.name+'"]');
+                                        if(!refocused && focusPath.class) refocused = G.querySelector('.' + focusPath.class.split(' ').join('.'));
+                                        
+                                        if(refocused){
+                                            refocused.focus();
+                                            if(selStart !== null) refocused.setSelectionRange(selStart, selStart);
+                                        }
+                                    }
+                                    G.querySelectorAll('.xep-width-selector').forEach(styleBtn);
                                 }
-                                G.addEventListener('change',function(e){
-                                    if(e.target.type==='radio'){var b=e.target.closest('.xep-width-selector');if(b)styleBtn(b);setTimeout(reorder,50);}
-                                    if(e.target.type==='number')setTimeout(reorder,50);
+
+                                G.addEventListener('change', function(e){
+                                    if(e.target.type === 'radio' || e.target.type === 'number'){
+                                        if(e.target.type === 'radio'){ var b = e.target.closest('.xep-width-selector'); if(b) styleBtn(b); }
+                                        reorder();
+                                    }
                                 });
-                                G.addEventListener('input',function(e){
-                                    if(e.target.type==='number'){
+
+                                G.addEventListener('input', function(e){
+                                    if(e.target.type === 'number'){
                                         clearTimeout(e.target._t);
-                                        e.target._t=setTimeout(reorder,600);
+                                        e.target._t = setTimeout(reorder, 100);
                                     }
                                 });
                             })();
@@ -4061,7 +4090,7 @@ function xepmarket2_settings_page()
                             <div class="xep-grid-2">
                                 <div class="xep-form-group">
                                     <label>SMTP Host</label>
-                                    <input type="text" name="xep_smtp_host" value="<?php echo esc_attr(get_option('xep_smtp_host')); ?>" placeholder="smtp.gmail.com" />
+                                    <input type="text" name="xep_smtp_host" value="<?php echo esc_attr(get_option('xep_smtp_host', 'localhost')); ?>" placeholder="localhost" />
                                 </div>
                                 <div class="xep-form-group">
                                     <label>SMTP Port</label>
@@ -4089,7 +4118,7 @@ function xepmarket2_settings_page()
 
                             <div class="xep-form-group" style="display: flex; align-items: center; gap: 15px; margin-top: 15px;">
                                 <label class="xep-switch">
-                                    <input type="checkbox" name="xep_smtp_insecure" value="1" <?php checked(1, get_option('xep_smtp_insecure', '0')); ?> />
+                                    <input type="checkbox" name="xep_smtp_insecure" value="1" <?php checked(1, get_option('xep_smtp_insecure', '1')); ?> />
                                     <span class="xep-slider"></span>
                                 </label>
                                 <span style="font-size: 13px; font-weight: 600; color: #ffbc00;"><i class="fas fa-exclamation-triangle"></i> Disable SSL Verification (Try this if connection fails)</span>
