@@ -9,6 +9,92 @@ if (!defined('ABSPATH'))
     exit;
 
 /**
+ * Get the latest Swap page content
+ */
+function xepmarket2_get_swap_page_content()
+{
+    return '<div class="xep-swap-page-wrapper" style="max-width: 1000px; margin: 0 auto; padding: 40px 20px;">
+                <div class="xep-swap-header" style="text-align: center; margin-bottom: 40px;">
+                    <h2 style="font-family: \'Outfit\', sans-serif; font-size: 32px; font-weight: 700; color: #fff; margin-bottom: 15px;">Instant <span class="logo-accent">Crypto Swap</span></h2>
+                    <p style="color: #a0a0b8; font-size: 18px; max-width: 700px; margin: 0 auto; line-height: 1.6;">Swap BTC, ETH, USDT and 2000+ assets directly for <strong>XEP (Electra Protocol)</strong>. Non-custodial, secure, and registration-free.</p>
+                    <div style="margin-top: 25px;">
+                        <a href="https://stealthex.io/?amount=110&from=usdtbsc&to=xep" target="_blank" class="ox-btn ox-btn-primary" style="display: inline-flex; align-items: center; gap: 10px; padding: 12px 30px; text-decoration: none; border-radius: 50px; font-weight: 600;">
+                            <span>🚀 Launch Direct Swap</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="xep-swap-grid" style="display: grid; grid-template-columns: 1fr; gap: 30px;">
+                    <!-- MAIN WIDGET -->
+                    <div style="width: 100%; display: flex; justify-content: center; position: relative; min-height: 480px;">
+                    <div class="xep-swap-main-card glass-card" style="padding: 0; border-radius: 20px; background: rgba(15, 10, 10, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); overflow: hidden; width: 100%; max-width: 500px; box-shadow: 0px 10px 40px rgba(0, 0, 0, 0.4);">
+                        <iframe id="stealthex-widget" 
+                            style="border: none; border-radius: 12px; overflow: hidden; width: 100%; height: 480px; background: transparent; display: block;" 
+                            src="https://stealthex.io/widget/442292eb-3cbc-4276-91fc-cbcfe9a45d54"
+                            allow="payment; clipboard-read; clipboard-write"
+                            title="OmniXEP Crypto Swap">
+                        </iframe>
+                    </div>
+                </div>
+
+                    <!-- INFO FOOTER - 3 BLOCKS -->
+                    <div class="xep-swap-info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 20px;">
+                        <div class="info-item glass-card" style="padding: 20px; border-radius: 15px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                            <h4 style="color: #00f2ff; margin-top: 0; display: flex; align-items: center; gap: 8px; font-family: \'Outfit\', sans-serif;">🛡️ Secure & Private</h4>
+                            <p style="color: #868e96; font-size: 14px; margin-bottom: 0; line-height: 1.5;">No account or KYC required. Your funds never stay on the platform; they are sent directly to your wallet.</p>
+                        </div>
+                        <div class="info-item glass-card" style="padding: 20px; border-radius: 15px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                            <h4 style="color: #00f2ff; margin-top: 0; display: flex; align-items: center; gap: 8px; font-family: \'Outfit\', sans-serif;">⚡ Fast Processing</h4>
+                            <p style="color: #868e96; font-size: 14px; margin-bottom: 0; line-height: 1.5;">Most swaps complete in under 15 minutes. High liquidity ensures competitive rates for XEP conversions.</p>
+                        </div>
+                        <div class="info-item glass-card" style="padding: 20px; border-radius: 15px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                            <h4 style="color: #00f2ff; margin-top: 0; display: flex; align-items: center; gap: 8px; font-family: \'Outfit\', sans-serif;">🌐 2000+ Assets</h4>
+                            <p style="color: #868e96; font-size: 14px; margin-bottom: 0; line-height: 1.5;">Swap XEP with a vast range of cryptocurrencies. From Bitcoin to the latest DeFi tokens, all in one place.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="xep-swap-notice" style="margin-top: 40px; text-align: center; opacity: 0.8;">
+                    <p style="color: #606070; font-size: 12px;"><a href="https://stealthex.io/?amount=110&from=usdtbsc&to=xep" target="_blank" style="color: inherit; text-decoration: underline;">Powered by StealthEX. Decentralized & Non-Custodial Exchange Service.</a></p>
+                </div>
+            </div>';
+}
+
+/**
+ * Automatically create or update the Swap page
+ */
+function xepmarket2_auto_update_swap_page()
+{
+    $theme_ver = defined('XEPMARKET_ALFA_VERSION') ? XEPMARKET_ALFA_VERSION : '2.1';
+    $last_swap_ver = get_option('xepmarket_swap_page_version', '0');
+
+    // Only update if theme version is greater than the last recorded swap version
+    // OR if the swap page doesn't exist at all
+    $swap_page = get_page_by_path('swap');
+
+    if (!$swap_page || version_compare($theme_ver, $last_swap_ver, '>')) {
+        $content = xepmarket2_get_swap_page_content();
+
+        $post_data = array(
+            'post_title' => 'Swap',
+            'post_content' => $content,
+            'post_status' => 'publish',
+            'post_type' => 'page',
+            'post_name' => 'swap'
+        );
+
+        if ($swap_page) {
+            $post_data['ID'] = $swap_page->ID;
+            wp_update_post($post_data);
+        } else {
+            wp_insert_post($post_data);
+        }
+
+        update_option('xepmarket_swap_page_version', $theme_ver);
+    }
+}
+
+/**
  * Main function to import demo data
  * @param bool $apply_theme_defaults If false, only create pages/menus; theme options stay as-is (current state).
  */
@@ -26,7 +112,7 @@ function xepmarket2_setup_demo_data($apply_theme_defaults = true)
         ),
         'swap' => array(
             'title' => 'Swap',
-            'content' => '<div style="display: flex; justify-content: center; width: 100%;"><iframe id="stealthex-widget" style="border: none; border-radius: 10px; overflow: hidden; width: 100%; max-width: 960px; height: 330px; box-shadow: 0px 0px 32px 0px rgba(0, 0, 0, 0.06);" src="https://stealthex.io/widget/442292eb-3cbc-4276-91fc-cbcfe9a45d54"></iframe></div>',
+            'content' => xepmarket2_get_swap_page_content(),
             'template' => '',
         ),
         'shop' => array(

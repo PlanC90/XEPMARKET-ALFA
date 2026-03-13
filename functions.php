@@ -25,6 +25,11 @@ add_action('init', function () {
     if (class_exists('WooCommerce') && !function_exists('xepmarket2_affiliate_admin_page')) {
         require_once get_template_directory() . '/inc/affiliate.php';
     }
+    
+    // Automatically ensure Swap page is up-to-date
+    if (function_exists('xepmarket2_auto_update_swap_page')) {
+        xepmarket2_auto_update_swap_page();
+    }
 }, 1);
 
 if (!defined('ABSPATH')) {
@@ -110,6 +115,11 @@ add_action('added_option', 'xepmarket2_clear_options_cache');
 add_action('after_switch_theme', function () {
     delete_transient('xepmarket2_all_options');
     update_option('xepmarket2_affiliate_flush_rules', 1);
+    
+    // Auto-setup Swap page on activation
+    if (function_exists('xepmarket2_auto_update_swap_page')) {
+        xepmarket2_auto_update_swap_page();
+    }
 });
 
 /**
