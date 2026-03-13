@@ -37,8 +37,13 @@ define('XEPMARKET_ALFA_VERSION', '2.1');
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
  * on servers that have the PHP mail() function completely removed/disabled.
+ * Skipped when SMTP module is active (SMTP doesn't need native mail()).
  */
 add_filter('pre_wp_mail', function ($return) {
+    // If SMTP module is active, allow wp_mail to proceed (PHPMailer uses sockets, not mail())
+    if (get_option('xep_smtp_enable', '0') == '1' && !empty(get_option('xep_smtp_host'))) {
+        return $return;
+    }
     if (!function_exists('mail')) {
         return false; // Stop wp_mail from proceeding to PHPMailer and crashing
     }
@@ -415,6 +420,9 @@ add_action('init', 'xepmarket2_setup_woocommerce_checkout_registration');
 
 // 3. Pre-check the "Create an account?" checkbox by default
 add_filter('woocommerce_create_account_default_checked', '__return_true');
+
+// 4. Disable default WooCommerce Terms and Conditions checkbox (as requested)
+add_filter('woocommerce_checkout_show_terms', '__return_false');
 
 /**
  * ============================================================================
@@ -1500,6 +1508,17 @@ function xepmarket2_settings_init()
     ));
     register_setting('xepmarket2_settings_group', 'xepmarket2_privacy_policy_label');
     register_setting('xepmarket2_settings_group', 'xepmarket2_privacy_policy_required');
+
+    // Mail Settings (SMTP)
+    register_setting('xepmarket2_settings_group', 'xep_smtp_enable');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_host');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_port');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_auth');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_encryption');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_username');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_password');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_from_email');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_from_name');
 }
 
 /**
@@ -1881,6 +1900,9 @@ function xepmarket2_settings_page()
                     <div class="xep-nav-item" data-tab="tab-demo"
                         style="border-top: 1px solid var(--admin-border); padding-top: 15px; margin-top: 10px; color: var(--admin-primary);">
                         <i class="fas fa-magic"></i> Demo Setup
+                    </div>
+                    <div class="xep-nav-item" data-tab="tab-mail">
+                        <i class="fas fa-envelope"></i> Mail Settings
                     </div>
                     <div class="xep-nav-item" data-tab="tab-updater">
                         <i class="fas fa-sync-alt"></i> Auto Updater
@@ -4013,6 +4035,101 @@ function xepmarket2_settings_page()
                         </div>
                     </div>
 
+                    <!-- Tab: Mail Settings -->
+                    <div id="tab-mail" class="xep-tab-content">
+                        <div class="xep-section-card">
+                            <h3 style="color: var(--admin-primary);"><i class="fas fa-envelope"></i> SMTP Mail Server Settings</h3>
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 25px; padding: 15px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid var(--admin-border);">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div style="width: 40px; height: 40px; background: var(--admin-primary); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white;">
+                                        <i class="fas fa-power-off"></i>
+                                    </div>
+                                    <div>
+                                        <h4 style="margin: 0; font-size: 15px;">Enable SMTP Module</h4>
+                                        <p style="margin: 0; font-size: 12px; opacity: 0.6;">Turn off if you use a 3rd party SMTP plugin.</p>
+                                    </div>
+                                </div>
+                                <label class="xep-switch">
+                                    <input type="checkbox" name="xep_smtp_enable" value="1" <?php checked(1, get_option('xep_smtp_enable', '0')); ?> />
+                                    <span class="xep-slider"></span>
+                                </label>
+                            </div>
+
+                            <p class="description" style="margin-bottom: 25px;">Configure your outgoing mail server (SMTP) to ensure transactional emails (orders, resets) are delivered reliably.</p>
+                            
+                            <div class="xep-grid-2">
+                                <div class="xep-form-group">
+                                    <label>SMTP Host</label>
+                                    <input type="text" name="xep_smtp_host" value="<?php echo esc_attr(get_option('xep_smtp_host')); ?>" placeholder="smtp.gmail.com" />
+                                </div>
+                                <div class="xep-form-group">
+                                    <label>SMTP Port</label>
+                                    <input type="text" name="xep_smtp_port" value="<?php echo esc_attr(get_option('xep_smtp_port', '465')); ?>" placeholder="465" />
+                                </div>
+                            </div>
+
+                            <div class="xep-grid-2" style="margin-top: 20px;">
+                                <div class="xep-form-group">
+                                    <label>Encryption</label>
+                                    <select name="xep_smtp_encryption">
+                                        <option value="ssl" <?php selected('ssl', get_option('xep_smtp_encryption', 'ssl')); ?>>SSL (Recommended for 465)</option>
+                                        <option value="tls" <?php selected('tls', get_option('xep_smtp_encryption')); ?>>TLS (Recommended for 587)</option>
+                                        <option value="none" <?php selected('none', get_option('xep_smtp_encryption')); ?>>None</option>
+                                    </select>
+                                </div>
+                                <div class="xep-form-group" style="display: flex; align-items: center; gap: 15px; padding-top: 25px;">
+                                    <label class="xep-switch">
+                                        <input type="checkbox" name="xep_smtp_auth" value="1" <?php checked(1, get_option('xep_smtp_auth', '1')); ?> />
+                                        <span class="xep-slider"></span>
+                                    </label>
+                                    <span style="font-size: 14px; font-weight: 600; color: var(--text-muted);">Enable SMTP Authentication</span>
+                                </div>
+                            </div>
+
+                            <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
+
+                            <div class="xep-grid-2">
+                                <div class="xep-form-group">
+                                    <label>SMTP Username</label>
+                                    <input type="text" name="xep_smtp_username" value="<?php echo esc_attr(get_option('xep_smtp_username')); ?>" placeholder="user@example.com" />
+                                </div>
+                                <div class="xep-form-group">
+                                    <label>SMTP Password</label>
+                                    <input type="password" name="xep_smtp_password" value="<?php echo esc_attr(get_option('xep_smtp_password')); ?>" placeholder="••••••••" />
+                                </div>
+                            </div>
+
+                            <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
+
+                            <div class="xep-grid-2">
+                                <div class="xep-form-group">
+                                    <label>From Email Address</label>
+                                    <input type="email" name="xep_smtp_from_email" value="<?php echo esc_attr(get_option('xep_smtp_from_email')); ?>" placeholder="no-reply@yourstore.com" />
+                                    <p class="description">Deliver emails using this address.</p>
+                                </div>
+                                <div class="xep-form-group">
+                                    <label>From Name</label>
+                                    <input type="text" name="xep_smtp_from_name" value="<?php echo esc_attr(get_option('xep_smtp_from_name', get_bloginfo('name'))); ?>" />
+                                    <p class="description">Displays as the sender name.</p>
+                                </div>
+                            </div>
+
+                            <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
+
+                            <div class="xep-section-card" style="background: rgba(50, 215, 75, 0.03); border: 1px solid rgba(50, 215, 75, 0.1); padding: 20px; border-radius: 12px;">
+                                <h4 style="margin-top: 0; color: #32d74b; display: flex; align-items: center; gap: 8px;"><i class="fas fa-paper-plane"></i> Send Test Email</h4>
+                                <div class="xep-form-group">
+                                    <label>Recipient Email</label>
+                                    <input type="email" id="xep_test_email_recipient" value="<?php echo esc_attr(get_option('admin_email')); ?>" placeholder="test@example.com" />
+                                </div>
+                                <button type="button" id="xep_send_test_email_btn" class="xep-save-btn" style="background: linear-gradient(135deg, #32d74b, #28a745) !important; height: 50px; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100% !important; border-radius: 12px !important; border: none !important; font-weight: 700 !important; font-size: 13px !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; box-shadow: 0 4px 15px rgba(50, 215, 75, 0.2) !important; margin-top: 15px;">
+                                    <i class="fas fa-paper-plane"></i> <span class="btn-text">Send Test Email</span>
+                                </button>
+                                <div id="xep_test_email_msg" style="margin-top: 15px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Tab: Auto Updater -->
                     <div id="tab-updater" class="xep-tab-content">
                         <?php
@@ -4263,6 +4380,50 @@ function xepmarket2_settings_page()
                 });
             });
 
+            // ── AJAX: Send Test Email ──
+            $('#xep_send_test_email_btn').on('click', function() {
+                var $btn = $(this);
+                var $status = $('#xep_test_email_msg');
+                var recipient = $('#xep_test_email_recipient').val();
+                var nonce = $('#xep_admin_ajax_nonce').val();
+
+                if (!recipient) {
+                    alert('Please enter a recipient email.');
+                    return;
+                }
+
+                $btn.prop('disabled', true).find('.btn-text').text('Sending...');
+                $btn.find('i').removeClass('fa-paper-plane').addClass('fa-spinner fa-spin');
+                $status.html('').css('color', '');
+
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'xep_send_test_email',
+                        nonce: nonce,
+                        test_email: recipient
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            $status.html('<i class="fas fa-check-circle"></i> ' + response.data).css('color', '#32d74b');
+                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-check-circle');
+                            $btn.find('.btn-text').text('Sent!');
+                        } else {
+                            $status.html('<i class="fas fa-exclamation-circle"></i> ' + response.data).css('color', '#ff453a');
+                            $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-paper-plane');
+                            $btn.find('.btn-text').text('Retry Send');
+                            $btn.prop('disabled', false);
+                        }
+                    },
+                    error: function() {
+                        $status.html('<i class="fas fa-exclamation-circle"></i> Connection error.').css('color', '#ff453a');
+                        $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-paper-plane');
+                        $btn.prop('disabled', false);
+                    }
+                });
+            });
+
             // Status message auto-hide
             if ($('.updated, .error').length > 0) {
                 setTimeout(function () {
@@ -4272,6 +4433,75 @@ function xepmarket2_settings_page()
         });
     </script>
     <?php
+}
+
+/**
+ * Configure SMTP for outgoing WordPress emails
+ */
+add_action('phpmailer_init', 'xep_mail_smtp_init');
+function xep_mail_smtp_init($phpmailer) {
+    if (!$phpmailer) return;
+
+    if (get_option('xep_smtp_enable', '0') != '1') return; // Exit if the module is disabled
+
+    $host = get_option('xep_smtp_host');
+    if (empty($host)) return; // Don't override if host is not set
+
+    $phpmailer->isSMTP();
+    $phpmailer->Host       = $host;
+    $phpmailer->Port       = get_option('xep_smtp_port', '465');
+    $phpmailer->SMTPAuth   = (get_option('xep_smtp_auth', '1') == '1');
+    $phpmailer->SMTPSecure = get_option('xep_smtp_encryption', 'ssl');
+    if ($phpmailer->SMTPSecure === 'none') {
+        $phpmailer->SMTPSecure = '';
+        $phpmailer->SMTPAutoTLS = false;
+    }
+    $phpmailer->Username   = get_option('xep_smtp_username');
+    $phpmailer->Password   = get_option('xep_smtp_password');
+
+    // From Header
+    $from_email = get_option('xep_smtp_from_email');
+    if ($from_email) {
+        $phpmailer->From = $from_email;
+    }
+    
+    $from_name = get_option('xep_smtp_from_name');
+    if ($from_name) {
+        $phpmailer->FromName = $from_name;
+    }
+}
+
+/**
+ * AJAX Handler: Send Test Email
+ */
+add_action('wp_ajax_xep_send_test_email', 'xep_handle_send_test_email');
+function xep_handle_send_test_email() {
+    check_ajax_referer('xep_admin_nonce', 'nonce');
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Unauthorized');
+    }
+
+    $to = isset($_POST['test_email']) ? sanitize_email($_POST['test_email']) : '';
+    if (empty($to)) {
+        wp_send_json_error('Please enter a valid email address.');
+    }
+
+    $subject = 'XEPMARKET SMTP Test Email';
+    $message = "Hello!\n\nThis is a test email from your XEPMARKET-ALFA theme SMTP settings.\n\nIf you received this, your mail server configuration is working correctly!\n\nSent at: " . date('Y-m-d H:i:s');
+    
+    $sent = wp_mail($to, $subject, $message);
+
+    if ($sent) {
+        wp_send_json_success('Test email sent successfully!');
+    } else {
+        global $phpmailer;
+        $error = '';
+        if (isset($phpmailer) && !empty($phpmailer->ErrorInfo)) {
+            $error = ': ' . $phpmailer->ErrorInfo;
+        }
+        wp_send_json_error('Failed to send test email' . $error);
+    }
 }
 
 
