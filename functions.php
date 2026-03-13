@@ -1611,10 +1611,7 @@ function xepmarket2_apply_theme_coupons($data, $code) {
  * WooCommerce Integration: Force enable coupons on front-end if theme coupons are active
  */
 add_filter('woocommerce_coupons_enabled', function($enabled) {
-    if (get_option('xepmarket2_coupons_enabled', '0') === '1') {
-        return true;
-    }
-    return $enabled;
+    return get_option('xepmarket2_coupons_enabled', '0') === '1';
 });
 
 /**
