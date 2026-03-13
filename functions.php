@@ -415,6 +415,11 @@ function xepmarket2_setup_woocommerce_checkout_registration() {
     if (get_option('woocommerce_enable_guest_checkout') !== 'yes') {
         update_option('woocommerce_enable_guest_checkout', 'yes');
     }
+
+    // 3. Enable Registration on My Account page
+    if (get_option('woocommerce_enable_myaccount_registration') !== 'yes') {
+        update_option('woocommerce_enable_myaccount_registration', 'yes');
+    }
 }
 add_action('init', 'xepmarket2_setup_woocommerce_checkout_registration');
 

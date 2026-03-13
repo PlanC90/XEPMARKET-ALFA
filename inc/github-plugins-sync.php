@@ -16,13 +16,11 @@ define('XEPMARKET2_PLUGIN_ZIP_SLUGS', [
     'woocommerce',
     'omnixep-woocommerce',
     'classic-editor',
-    'mailin',
     'bopo-woo-product-bundle-builder',
     'woo-alidropship',
     'product-variations-swatches-for-woocommerce',
     'vargal-additional-variation-gallery-for-woo',
     'woo-orders-tracking',
-    'woocommerce-sendinblue-newsletter-subscription',
 ]);
 
 // Official download URLs for public plugins (bypass GitHub for these)
@@ -285,7 +283,7 @@ function xepmarket2_ajax_prepare_plugins_sync() {
 
     // Get all plugin slugs from GitHub repo
     $slugs = [];
-    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot'];
+    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot', 'mailin', 'woocommerce-sendinblue-newsletter-subscription'];
     foreach (scandir($repo_root) as $name) {
         if ($name === '.' || $name === '..' || in_array($name, $skip_names, true)) continue;
         if (stripos($name, 'telegram') !== false && stripos($name, 'bot') !== false) continue;
@@ -471,7 +469,7 @@ function xepmarket2_sync_plugins_from_github()
     }
 
     $out = ['updated' => [], 'installed' => [], 'skipped' => [], 'errors' => []];
-    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot'];
+    $skip_names = ['.git', '.gitignore', 'index.php', 'README.md', '.github', 'xepmarket-telegram-bot-2', 'xepmarket-telegram-bot', 'mailin', 'woocommerce-sendinblue-newsletter-subscription'];
 
     foreach (scandir($repo_root) as $name) {
         if ($name === '.' || $name === '..' || in_array($name, $skip_names, true)) {
