@@ -1519,6 +1519,7 @@ function xepmarket2_settings_init()
     register_setting('xepmarket2_settings_group', 'xep_smtp_password');
     register_setting('xepmarket2_settings_group', 'xep_smtp_from_email');
     register_setting('xepmarket2_settings_group', 'xep_smtp_from_name');
+    register_setting('xepmarket2_settings_group', 'xep_smtp_insecure');
 }
 
 /**
@@ -4086,6 +4087,14 @@ function xepmarket2_settings_page()
                                 </div>
                             </div>
 
+                            <div class="xep-form-group" style="display: flex; align-items: center; gap: 15px; margin-top: 15px;">
+                                <label class="xep-switch">
+                                    <input type="checkbox" name="xep_smtp_insecure" value="1" <?php checked(1, get_option('xep_smtp_insecure', '0')); ?> />
+                                    <span class="xep-slider"></span>
+                                </label>
+                                <span style="font-size: 13px; font-weight: 600; color: #ffbc00;"><i class="fas fa-exclamation-triangle"></i> Disable SSL Verification (Try this if connection fails)</span>
+                            </div>
+
                             <hr style="border: none; border-top: 1px solid var(--admin-border); margin: 25px 0;">
 
                             <div class="xep-grid-2">
@@ -4458,6 +4467,17 @@ function xep_mail_smtp_init($phpmailer) {
     }
     $phpmailer->Username   = get_option('xep_smtp_username');
     $phpmailer->Password   = get_option('xep_smtp_password');
+
+    // Handle Certificate Verification Failure
+    if (get_option('xep_smtp_insecure', '0') == '1') {
+        $phpmailer->SMTPOptions = array(
+            'ssl' => array(
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+                'allow_self_signed' => true
+            )
+        );
+    }
 
     // From Header
     $from_email = get_option('xep_smtp_from_email');

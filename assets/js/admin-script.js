@@ -301,4 +301,18 @@ jQuery(document).ready(function ($) {
             }
         }
     });
+
+    // SMTP Port Auto-Switch Logic
+    $('select[name="xep_smtp_encryption"]').on('change', function () {
+        var encryption = $(this).val();
+        var $portInput = $('input[name="xep_smtp_port"]');
+
+        if (encryption === 'ssl') {
+            $portInput.val('465');
+        } else if (encryption === 'tls') {
+            $portInput.val('587');
+        } else if (encryption === 'none') {
+            $portInput.val('25');
+        }
+    });
 });
