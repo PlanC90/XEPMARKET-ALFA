@@ -402,6 +402,8 @@ class XepMarket_Theme_Updater
                 set_site_transient('update_themes', $trans_check);
             }
 
+            $skin = new Automatic_Upgrader_Skin();
+            $upgrader = new Theme_Upgrader($skin);
             $result = $upgrader->upgrade($this->theme_slug);
 
             if (is_wp_error($result)) {
