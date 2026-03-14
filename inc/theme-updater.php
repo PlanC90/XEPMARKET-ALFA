@@ -50,8 +50,8 @@ class XepMarket_Theme_Updater
 
     public function __construct()
     {
-        // FORCE standard slug to avoid 404/MIME errors
-        $this->theme_slug = 'XEPMARKET-ALFA';
+        // Use current stylesheet folder as slug to handle renamed GitHub folders
+        $this->theme_slug = get_option('stylesheet', 'XEPMARKET-ALFA');
         $this->repo_user = 'PlanC90';
         $this->repo_name = 'XEPMARKET-ALFA';
 
@@ -342,6 +342,20 @@ class XepMarket_Theme_Updater
 
         // Force check updates so package info is refreshed in transient
         error_log("XEP Update DEBUG: Starting AJAX update. Slug: " . $this->theme_slug);
+        
+        // Initialize filesystem
+        if (function_exists('xepmarket2_init_filesystem')) {
+            $fs = xepmarket2_init_filesystem();
+            if (!$fs) {
+                error_log("XEP Update DEBUG: Filesystem init failed.");
+            } else {
+                error_log("XEP Update DEBUG: Filesystem initialized. Method: " . get_option('fs_method', 'unknown'));
+                error_log("XEP Update DEBUG: Root writable: " . ($fs->is_writable(ABSPATH) ? 'YES' : 'NO'));
+                error_log("XEP Update DEBUG: Themes writable: " . ($fs->is_writable(get_theme_root()) ? 'YES' : 'NO'));
+                error_log("XEP Update DEBUG: Current theme writable: " . ($fs->is_writable(get_template_directory()) ? 'YES' : 'NO'));
+            }
+        }
+
         delete_site_transient('update_themes');
         $release = $this->get_latest_release(true);
         wp_update_themes();
@@ -378,10 +392,15 @@ class XepMarket_Theme_Updater
                 define('FS_METHOD', 'direct');
             }
 
-            $skin = new Automatic_Upgrader_Skin();
-            $upgrader = new Theme_Upgrader($skin);
-
             error_log("XEP Update: Starting upgrade for " . $this->theme_slug . " using package " . $release->zipball_url);
+
+            // Double check transient before execution
+            $trans_check = get_site_transient('update_themes');
+            if (!isset($trans_check->response[$this->theme_slug])) {
+                error_log("XEP Update DEBUG: Transient missing response for {$this->theme_slug} JUST BEFORE upgrade call. Re-injecting...");
+                $this->check_update($trans_check);
+                set_site_transient('update_themes', $trans_check);
+            }
 
             $result = $upgrader->upgrade($this->theme_slug);
 
@@ -396,9 +415,17 @@ class XepMarket_Theme_Updater
                 $expected_v = ltrim($release->tag_name, 'v');
                 
                 if (version_compare($new_v, $expected_v, '>=')) {
+                    error_log("XEP Update DEBUG: Update actually worked (False Positive). Version is now " . $new_v);
                     $result = true; // False positive failure, but update actually worked
                 } else {
-                    error_log("XEP Update Failed: Upgrader returned false/null and version remaining at " . $new_v);
+                    error_log("XEP Update Failed: Upgrader returned false/null. Expected: {$expected_v}, Current: {$new_v}");
+                    // Check if theme slug is correct in transient
+                    $trans_after = get_site_transient('update_themes');
+                    if (isset($trans_after->response[$this->theme_slug])) {
+                        error_log("XEP Update DEBUG: Transient still has info: " . print_r($trans_after->response[$this->theme_slug], true));
+                    } else {
+                        error_log("XEP Update DEBUG: Transient response for {$this->theme_slug} is MISSING after upgrade call.");
+                    }
                     wp_send_json_error('System rejected the update. This usually happens if folder permissions (FS_METHOD) are restricted. Try updating via Appearance > Themes or check disk space.');
                 }
             }
@@ -625,19 +652,33 @@ class XepMarket_Theme_Updater
         }
 
         error_log("XEP Update DEBUG: rename_github_folder called. Source: " . $source);
+        
+        if (!isset($wp_filesystem) || empty($wp_filesystem)) {
+            error_log("XEP Update DEBUG: rename_github_folder - Filesystem NOT initialized. Attempting init...");
+            if (function_exists('xepmarket2_init_filesystem')) {
+                $wp_filesystem = xepmarket2_init_filesystem();
+            }
+        }
+
+        if (!$wp_filesystem) {
+            error_log("XEP Update DEBUG: rename_github_folder - Filesystem still NULL. Cannot proceed with renaming.");
+            return $source;
+        }
 
         $source_files = $wp_filesystem->dirlist($source);
         if ($source_files) {
             foreach ($source_files as $file) {
-                error_log("XEP Update DEBUG: Checking file in source: " . $file['name'] . " (type: " . $file['type'] . ")");
+                error_log("XEP Update DEBUG: Checking file in source: " . $file['name'] . " (type: " . (isset($file['type']) ? $file['type'] : 'unknown') . ")");
                 // If we find any directory that looks like a GitHub repo folder
                 $is_github_folder = (strpos(strtolower($file['name']), strtolower($this->repo_name)) !== false || strpos(strtolower($file['name']), strtolower($this->repo_user)) !== false);
                 
-                if ($file['type'] === 'd' && $is_github_folder) {
+                if (isset($file['type']) && $file['type'] === 'd' && $is_github_folder) {
                     $potential_theme_dir = trailingslashit($source) . $file['name'];
                     if ($wp_filesystem->exists(trailingslashit($potential_theme_dir) . 'style.css')) {
                         error_log("XEP Update DEBUG: Found matching theme folder: " . $file['name']);
                         return trailingslashit($potential_theme_dir);
+                    } else {
+                        error_log("XEP Update DEBUG: Folder " . $file['name'] . " matches pattern but NO style.css found inside.");
                     }
                 }
             }
