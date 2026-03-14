@@ -341,24 +341,35 @@ class XepMarket_Theme_Updater
         require_once ABSPATH . 'wp-admin/includes/misc.php';
 
         // Force check updates so package info is refreshed in transient
+        error_log("XEP Update DEBUG: Starting AJAX update. Slug: " . $this->theme_slug);
         delete_site_transient('update_themes');
         $release = $this->get_latest_release(true);
         wp_update_themes();
 
         // ── ROBUSTNESS FIX: Manually inject update info if missing in transient ──
         $transient = get_site_transient('update_themes');
-        if ($release && isset($release->tag_name) && (!isset($transient->response[$this->theme_slug]) || empty($transient->response[$this->theme_slug]['package']))) {
-            if (!is_object($transient)) $transient = new stdClass();
-            if (!isset($transient->response)) $transient->response = array();
+        if ($release && isset($release->tag_name)) {
+            $expected_v = ltrim($release->tag_name, 'v');
+            error_log("XEP Update DEBUG: Latest release v{$expected_v}. Checking transient...");
             
-            $transient->checked[$this->theme_slug] = XEPMARKET_ALFA_VERSION;
-            $transient->response[$this->theme_slug] = array(
-                'theme'       => $this->theme_slug,
-                'new_version' => ltrim($release->tag_name, 'v'),
-                'url'         => $release->html_url,
-                'package'     => $release->zipball_url,
-            );
-            set_site_transient('update_themes', $transient);
+            if (!isset($transient->response[$this->theme_slug]) || empty($transient->response[$this->theme_slug]['package'])) {
+                error_log("XEP Update DEBUG: Package info missing in transient. Injecting manually...");
+                if (!is_object($transient)) $transient = new stdClass();
+                if (!isset($transient->response)) $transient->response = array();
+                
+                $transient->checked[$this->theme_slug] = XEPMARKET_ALFA_VERSION;
+                $transient->response[$this->theme_slug] = array(
+                    'theme'       => $this->theme_slug,
+                    'new_version' => $expected_v,
+                    'url'         => $release->html_url,
+                    'package'     => $release->zipball_url,
+                );
+                set_site_transient('update_themes', $transient);
+            } else {
+                error_log("XEP Update DEBUG: Transient already has package: " . $transient->response[$this->theme_slug]['package']);
+            }
+        } else {
+            error_log("XEP Update DEBUG: Could not fetch latest release from GitHub.");
         }
 
         try {
@@ -613,19 +624,26 @@ class XepMarket_Theme_Updater
             return $source;
         }
 
+        error_log("XEP Update DEBUG: rename_github_folder called. Source: " . $source);
+
         $source_files = $wp_filesystem->dirlist($source);
         if ($source_files) {
             foreach ($source_files as $file) {
+                error_log("XEP Update DEBUG: Checking file in source: " . $file['name'] . " (type: " . $file['type'] . ")");
                 // If we find any directory that looks like a GitHub repo folder
-                if ($file['type'] === 'd' && (strpos($file['name'], $this->repo_name) !== false || strpos($file['name'], $this->repo_user) !== false)) {
+                $is_github_folder = (strpos(strtolower($file['name']), strtolower($this->repo_name)) !== false || strpos(strtolower($file['name']), strtolower($this->repo_user)) !== false);
+                
+                if ($file['type'] === 'd' && $is_github_folder) {
                     $potential_theme_dir = trailingslashit($source) . $file['name'];
                     if ($wp_filesystem->exists(trailingslashit($potential_theme_dir) . 'style.css')) {
+                        error_log("XEP Update DEBUG: Found matching theme folder: " . $file['name']);
                         return trailingslashit($potential_theme_dir);
                     }
                 }
             }
         }
         
+        error_log("XEP Update DEBUG: No matching subfolder found. Returning original source.");
         return $source;
     }
 }
