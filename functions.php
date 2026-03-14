@@ -36,8 +36,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 2.2 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '2.2');
+// Define Theme Version: 1.37 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '1.37');
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
