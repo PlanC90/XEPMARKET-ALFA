@@ -342,25 +342,54 @@ class XepMarket_Theme_Updater
 
         // Force check updates so package info is refreshed in transient
         delete_site_transient('update_themes');
-        $this->get_latest_release(true);
+        $release = $this->get_latest_release(true);
         wp_update_themes();
 
+        // ── ROBUSTNESS FIX: Manually inject update info if missing in transient ──
+        $transient = get_site_transient('update_themes');
+        if ($release && isset($release->tag_name) && (!isset($transient->response[$this->theme_slug]) || empty($transient->response[$this->theme_slug]['package']))) {
+            if (!is_object($transient)) $transient = new stdClass();
+            if (!isset($transient->response)) $transient->response = array();
+            
+            $transient->checked[$this->theme_slug] = XEPMARKET_ALFA_VERSION;
+            $transient->response[$this->theme_slug] = array(
+                'theme'       => $this->theme_slug,
+                'new_version' => ltrim($release->tag_name, 'v'),
+                'url'         => $release->html_url,
+                'package'     => $release->zipball_url,
+            );
+            set_site_transient('update_themes', $transient);
+        }
+
         try {
-            // Using Automatic_Upgrader_Skin to keep it quiet
+            // Force direct filesystem method for local environments to avoid credentials prompt
+            if (!defined('FS_METHOD')) {
+                define('FS_METHOD', 'direct');
+            }
+
             $skin = new Automatic_Upgrader_Skin();
             $upgrader = new Theme_Upgrader($skin);
 
-            // Log start of update
-            error_log("XEP Update: Starting update for " . $this->theme_slug);
+            error_log("XEP Update: Starting upgrade for " . $this->theme_slug . " using package " . $release->zipball_url);
 
             $result = $upgrader->upgrade($this->theme_slug);
 
             if (is_wp_error($result)) {
                 error_log("XEP Update Error (WP_Error): " . $result->get_error_message());
                 wp_send_json_error($result->get_error_message());
-            } elseif ($result === false) {
-                error_log("XEP Update Failed: Upgrader returned false. Possible missing package or version mismatch.");
-                wp_send_json_error('System rejected the update. This usually happens if the update package is missing or folder permissions (FS_METHOD) are restricted. Try updating via Appearance > Themes.');
+            } elseif ($result === false || $result === null) {
+                // If it still returns false, checking if theme actually changed version
+                wp_clean_themes_cache();
+                $check_theme = wp_get_theme($this->theme_slug);
+                $new_v = $check_theme->get('Version');
+                $expected_v = ltrim($release->tag_name, 'v');
+                
+                if (version_compare($new_v, $expected_v, '>=')) {
+                    $result = true; // False positive failure, but update actually worked
+                } else {
+                    error_log("XEP Update Failed: Upgrader returned false/null and version remaining at " . $new_v);
+                    wp_send_json_error('System rejected the update. This usually happens if folder permissions (FS_METHOD) are restricted. Try updating via Appearance > Themes or check disk space.');
+                }
             }
 
             $release = $this->get_latest_release(false);
