@@ -37,9 +37,26 @@ define('XEPMARKET2_OFFICIAL_PLUGIN_URLS', [
  */
 function xepmarket2_init_filesystem() {
     global $wp_filesystem;
-    if (empty($wp_filesystem)) {
+    
+    // Ensure all necessary WP includes for filesystem operations are present
+    if ( ! function_exists('WP_Filesystem') ) {
         require_once ABSPATH . 'wp-admin/includes/file.php';
-        WP_Filesystem();
+    }
+    if ( ! function_exists('download_url') ) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+    if ( ! function_exists('unzip_file') ) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    require_once ABSPATH . 'wp-admin/includes/screen.php';
+
+    if (empty($wp_filesystem)) {
+        // Try to initialize. On some servers, this might fail or ask for credentials.
+        if ( ! WP_Filesystem() ) {
+            error_log("[OmniXEP Sync] WP_Filesystem initialization failed.");
+            return false;
+        }
     }
     return $wp_filesystem;
 }
@@ -322,6 +339,9 @@ function xepmarket2_ajax_install_plugin_step() {
 
     @set_time_limit(0);
     $wp_filesystem = xepmarket2_init_filesystem();
+    if ( ! $wp_filesystem ) {
+        wp_send_json_error(['message' => 'Could not initialize WordPress Filesystem. Check directory permissions.']);
+    }
 
     $slug = isset($_POST['slug']) ? sanitize_text_field($_POST['slug']) : '';
     $repo_root = get_transient('xep_sync_repo_root');
@@ -378,6 +398,7 @@ function xepmarket2_ajax_install_plugin_step() {
         }
     }
 
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
     $success = xepmarket2_copy_plugin_dir($source, $dest, $errors);
 
     if (!$success) {

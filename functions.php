@@ -36,8 +36,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Define Theme Version: 2.1 for Cache Management & Portability
-define('XEPMARKET_ALFA_VERSION', '2.1');
+// Define Theme Version: 2.2 for Cache Management & Portability
+define('XEPMARKET_ALFA_VERSION', '2.2');
 /**
  * COMPATIBILITY: Prevent Fatal Error if mail() is disabled on server
  * This prevents the site from crashing when WooCommerce or other plugins try to send emails
@@ -112,6 +112,38 @@ function xepmarket2_clear_options_cache($option_name)
 }
 add_action('updated_option', 'xepmarket2_clear_options_cache');
 add_action('added_option', 'xepmarket2_clear_options_cache');
+/**
+ * MIGRATION: Auto-detect and clear broken local/demo URLs from database
+ * This allows the dynamic fallback system to take over.
+ */
+function xepmarket2_migrate_broken_demo_urls()
+{
+    $keys = array(
+        'xepmarket2_slider_img_1',
+        'xepmarket2_slider_img_2',
+        'xepmarket2_slider_img_3',
+        'xepmarket2_footer_logo_img',
+        'xepmarket2_header_logo_img',
+        'xepmarket2_seo_ai_logo_url',
+        'xepmarket2_seo_og_image'
+    );
+    
+    $broken_found = false;
+    foreach ($keys as $key) {
+        $val = get_option($key);
+        // If the URL contains old test domains, clear it to allow theme fallback
+        if ($val && (strpos($val, 'xepmarket.local') !== false || strpos($val, 'xepmarket.com') !== false)) {
+            delete_option($key);
+            $broken_found = true;
+        }
+    }
+    
+    if ($broken_found) {
+        delete_transient('xepmarket2_all_options');
+    }
+}
+add_action('after_setup_theme', 'xepmarket2_migrate_broken_demo_urls');
+
 add_action('after_switch_theme', function () {
     delete_transient('xepmarket2_all_options');
     update_option('xepmarket2_affiliate_flush_rules', 1);
@@ -138,7 +170,7 @@ add_action('send_headers', function() {
                "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; " .
                "img-src 'self' data: https: http:; " .
                "connect-src 'self' https://api.omnixep.com https://api.coingecko.com https://mexc.com https://dextrade.com https://in-automate.brevo.com; " .
-               "frame-src 'self' https://stealthex.io; " .
+               "frame-src 'self' https://stealthex.io https://*.stealthex.io; " .
                "frame-ancestors 'self'; " .
                "base-uri 'self'; " .
                "form-action 'self';";
@@ -246,6 +278,21 @@ add_action('init', function () {
             // Re-activate to clear all caches
             switch_theme($expected_slug);
         }
+
+        // D. FORCE SWAP PAGE UPDATE
+        $swap_log = 'No update action taken';
+        if (function_exists('xepmarket2_auto_update_swap_page')) {
+            delete_option('xepmarket_swap_page_version');
+            $swap_log = xepmarket2_auto_update_swap_page();
+            $log[] = "Forced <strong>Swap Page</strong> update: $swap_log.";
+            $found_broken = true;
+        }
+
+        // E. CLEAR CACHES & FLUSH RULES
+        if (function_exists('wp_cache_flush')) wp_cache_flush();
+        global $wp_rewrite;
+        $wp_rewrite->flush_rules();
+        $log[] = "Object cache and rewrite rules flushed.";
 
         if ($found_broken || !empty($log)) {
             $msg = "<h3>Theme Structure Repair Log:</h3><ul><li>" . implode("</li><li>", $log) . "</li></ul>";
@@ -4596,6 +4643,11 @@ function xepmarket2_settings_page()
                             $status.html('<i class="fas fa-check-circle"></i> ' + response.data).css('color', '#32d74b');
                             $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-check-circle');
                             $btn.find('.btn-text').text('Sent!');
+                            
+                            // Refresh page after a brief delay so user can send to another address or see saved state
+                            setTimeout(function() {
+                                window.location.reload();
+                            }, 1500);
                         } else {
                             $status.html('<i class="fas fa-exclamation-circle"></i> ' + response.data).css('color', '#ff453a');
                             $btn.find('i').removeClass('fa-spinner fa-spin').addClass('fa-paper-plane');

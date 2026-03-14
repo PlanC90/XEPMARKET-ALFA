@@ -17,9 +17,20 @@ get_header();
                 $btn_text = xepmarket2_get_option_fast('xepmarket2_slider_btn_text_' . $i);
                 $btn_link = xepmarket2_get_option_fast('xepmarket2_slider_btn_link_' . $i);
                 $img = xepmarket2_get_option_fast('xepmarket2_slider_img_' . $i);
+                
+                // Self-healing fallback: Use theme assets if no image is set
+                if (empty($img)) {
+                    $fallback_map = array(
+                        1 => 'slide1.png',
+                        2 => 'slide_tech.png',
+                        3 => 'slide3.png'
+                    );
+                    $fallback = isset($fallback_map[$i]) ? $fallback_map[$i] : 'slide1.png';
+                    $img = get_template_directory_uri() . '/assets/images/' . $fallback;
+                }
                 ?>
                 <div class="slide-item <?php echo $i === 1 ? 'active' : ''; ?>"
-                    style="<?php echo $img ? "background: url('" . esc_url($img) . "') no-repeat center center / cover !important;" : ''; ?>">
+                    style="background: url('<?php echo esc_url($img); ?>') no-repeat center center / cover !important;">
                     <div class="hero-glow"></div>
                     <div class="container" style="position: relative; z-index: 5;">
                         <div class="slide-content">

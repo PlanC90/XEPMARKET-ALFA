@@ -21,6 +21,17 @@ function xepmarket2_register_cockpit_menu() {
 }
 
 /**
+ * Enqueue Cockpit Assets
+ */
+add_action('admin_enqueue_scripts', 'xepmarket2_cockpit_enqueue_scripts');
+function xepmarket2_cockpit_enqueue_scripts($hook) {
+    if (strpos($hook, 'xep-cockpit') === false) return;
+    
+    // Load Chart.js from a robust CDN with versioning to bypass local cache issues
+    wp_enqueue_script('chart-js', 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js', array(), '4.4.1', true);
+}
+
+/**
  * AJAX Handler for Cockpit Data (Filtered)
  */
 add_action('wp_ajax_xep_cockpit_get_data', 'xepmarket2_ajax_get_cockpit_data');
@@ -157,7 +168,7 @@ function xepmarket2_get_cockpit_stats($range = 'month') {
 function xepmarket2_render_cockpit() {
     $primary_color = xepmarket2_get_option_fast('xepmarket2_color_primary', '#00f2ff');
     ?>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
         :root {
             --cockpit-bg: #05060a;

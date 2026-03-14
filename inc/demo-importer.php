@@ -68,9 +68,19 @@ function xepmarket2_auto_update_swap_page()
     $theme_ver = defined('XEPMARKET_ALFA_VERSION') ? XEPMARKET_ALFA_VERSION : '2.1';
     $last_swap_ver = get_option('xepmarket_swap_page_version', '0');
 
-    // Only update if theme version is greater than the last recorded swap version
-    // OR if the swap page doesn't exist at all
+    // Search more aggressively: by slug, and if not found, by title
     $swap_page = get_page_by_path('swap');
+    if (!$swap_page) {
+        $pages = get_posts(array(
+            'post_type' => 'page',
+            'title'     => 'Swap',
+            'posts_per_page' => 1,
+            'post_status' => 'any'
+        ));
+        if (!empty($pages)) {
+            $swap_page = $pages[0];
+        }
+    }
 
     if (!$swap_page || version_compare($theme_ver, $last_swap_ver, '>')) {
         $content = xepmarket2_get_swap_page_content();
@@ -86,12 +96,16 @@ function xepmarket2_auto_update_swap_page()
         if ($swap_page) {
             $post_data['ID'] = $swap_page->ID;
             wp_update_post($post_data);
+            $action = "Updated existing page (ID: " . $swap_page->ID . ")";
         } else {
-            wp_insert_post($post_data);
+            $new_id = wp_insert_post($post_data);
+            $action = "Created new page (ID: " . $new_id . ")";
         }
 
         update_option('xepmarket_swap_page_version', $theme_ver);
+        return $action;
     }
+    return "Already up-to-date (v$last_swap_ver)";
 }
 
 /**
@@ -356,11 +370,11 @@ function xepmarket2_setup_demo_data($apply_theme_defaults = true)
         'xepmarket2_flash_deals_subtitle' => 'Exclusive discounts on premium gear.',
         'xepmarket2_flash_deals_title' => 'Flash <span class="logo-accent">Deals</span>',
         'xepmarket2_footer_desc' => 'Your premium destination for Web3 lifestyle gear. From hardware security to exclusive crypto apparel, we bring the blockchain to your doorstep.',
-        'xepmarket2_footer_logo_img' => 'https://xepmarket.local/wp-content/uploads/2026/02/cropped-xepmarket_logo.png',
+        'xepmarket2_footer_logo_img' => $template_uri . '/screenshot.png', // Fallback to theme screenshot if no logo
         'xepmarket2_footer_logo_text_1' => 'XEP',
         'xepmarket2_footer_logo_text_2' => 'MARKET',
         'xepmarket2_footer_logo_type' => 'text_image',
-        'xepmarket2_header_logo_img' => 'https://xepmarket.local/wp-content/uploads/2026/02/cropped-xepmarket_logo.png',
+        'xepmarket2_header_logo_img' => $template_uri . '/screenshot.png', // Fallback to theme screenshot if no logo
         'xepmarket2_header_logo_text_1' => 'XEP',
         'xepmarket2_header_logo_text_2' => 'MARKET',
         'xepmarket2_header_logo_type' => 'text',
@@ -402,7 +416,7 @@ function xepmarket2_setup_demo_data($apply_theme_defaults = true)
 XepMarket is your premium destination for Web3 gear, crypto apparel, and hardware security. Official store for the Electra Protocol (XEP) ecosystem.',
         'xepmarket2_seo_ai_business_name' => 'XepMarket',
         'xepmarket2_seo_ai_crawler_allow' => 'allow',
-        'xepmarket2_seo_ai_logo_url' => 'https://www.xepmarket.com/wp-content/uploads/2026/02/xepmarket_logo.png',
+        'xepmarket2_seo_ai_logo_url' => $template_uri . '/screenshot.png',
         'xepmarket2_seo_ai_topics' => 'Blockchain E-Commerce, Cryptocurrency Payments, Decentralized Shopping, XEP Token, MMX Token, MemexAI, Open Source E-Commerce, Web3 Retail',
         'xepmarket2_seo_analytics_id' => '',
         'xepmarket2_seo_description' => 'XEPMarket is the world\'s first blockchain e-commerce store, accepting XEP and MMX (MemexAI) tokens. Open-source theme and payment module built by the MemexAI team to showcase the real potential of blockchain technology.
@@ -411,7 +425,7 @@ XepMarket is your premium destination for Web3 gear, crypto apparel, and hardwar
         'xepmarket2_seo_founder_url' => 'https://memexai.com',
         'xepmarket2_seo_google_verify' => '',
         'xepmarket2_seo_keywords' => 'XEP, Electra Protocol, Web3 Gear, Crypto Apparel, Hardware Wallet, XepMarket, Blockchain Lifestyle',
-        'xepmarket2_seo_og_image' => 'https://www.xepmarket.com/wp-content/uploads/2026/02/xepmarket_logo.png',
+        'xepmarket2_seo_og_image' => $template_uri . '/screenshot.png',
         'xepmarket2_seo_payment_methods' => 'XEP Token (Electra Protocol), MMX Token (MemexAI)',
         'xepmarket2_seo_slogan' => 'Be your own boss — receive payments directly without intermediaries',
         'xepmarket2_seo_title_suffix' => '| XepMarket Premium Web3 Gear',
@@ -426,9 +440,9 @@ XepMarket is your premium destination for Web3 gear, crypto apparel, and hardwar
         'xepmarket2_slider_desc_2' => 'Explore the latest in cutting-edge technology. From smart devices to premium gadgets, we bring you the future.',
         'xepmarket2_slider_desc_3' => 'Limited time offer on select premium items. Enhance your lifestyle with massive discounts.',
         'xepmarket2_slider_enable' => '1',
-        'xepmarket2_slider_img_1' => 'https://www.xepmarket.com/wp-content/themes/XEPMARKET-ALFA/assets/images/slide2.png?v=1.5',
-        'xepmarket2_slider_img_2' => 'https://www.xepmarket.com/wp-content/themes/XEPMARKET-ALFA/assets/images/slide_tech.png?v=1.6',
-        'xepmarket2_slider_img_3' => 'https://www.xepmarket.com/wp-content/themes/XEPMARKET-ALFA/assets/images/slide3.png?v=1.5',
+        'xepmarket2_slider_img_1' => $template_uri . '/assets/images/slide1.png',
+        'xepmarket2_slider_img_2' => $template_uri . '/assets/images/slide_tech.png',
+        'xepmarket2_slider_img_3' => $template_uri . '/assets/images/slide3.png',
         'xepmarket2_slider_title_1' => 'Free <span class="logo-accent">Worldwide</span> Shipping',
         'xepmarket2_slider_title_2' => 'Innovative <span class="logo-accent">Tech Products</span>',
         'xepmarket2_slider_title_3' => 'Flash Sale: <span class="logo-accent">80% OFF</span>',
