@@ -651,7 +651,7 @@ class XepMarket_Theme_Updater
         global $wp_filesystem;
         
         // Only act on theme updates/installs for our specific theme
-        if (!($upgrader instanceof Theme_Upgrader) || empty($source)) {
+        if (!class_exists('Theme_Upgrader') || !($upgrader instanceof Theme_Upgrader) || empty($source)) {
             return $source;
         }
 
