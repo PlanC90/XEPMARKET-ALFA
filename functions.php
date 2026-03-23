@@ -5,7 +5,7 @@
  */
 
 // Define Theme Version
-define('XEPMARKET_ALFA_VERSION', '1.85');
+define('XEPMARKET_ALFA_VERSION', '2.5.45');
 
 // Include TGM Plugin Activation (github-plugins-sync first so TGMPA can use GitHub zip URL)
 require_once get_template_directory() . '/inc/github-plugins-sync.php';
